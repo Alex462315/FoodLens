@@ -1,0 +1,23 @@
+# Exclude markdown files
+*.md
+
+# Node modules
+node_modules/
+.next/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# IDE/Editor
+.vscode/
+.idea/
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# Build outputs
+dist/
+build/
