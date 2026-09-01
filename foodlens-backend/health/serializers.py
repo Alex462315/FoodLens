@@ -1,8 +1,10 @@
 """
 Health app — Serializers with nested writable conditions and allergies.
 
-The API accepts/returns conditions and allergies as flat string lists:
-    "conditions": ["Diabetes", "Hypertension"]
+The API accepts and returns conditions as objects with severity:
+    "conditions": [
+        {"condition_name": "Diabetes", "severity": "moderate"}
+    ]
     "allergies": ["Peanuts", "Gluten"]
 
 Internally, these are stored as related rows in HealthCondition and
@@ -13,16 +15,32 @@ from rest_framework import serializers
 from .models import HealthProfile, HealthCondition, Allergy
 
 
+class HealthConditionSerializer(serializers.ModelSerializer):
+    """
+    Serializer for HealthCondition model.
+    """
+    class Meta:
+        model = HealthCondition
+        fields = ['condition_name', 'severity']
+
+    def validate_severity(self, value):
+        valid = ['mild', 'moderate', 'severe']
+        if value not in valid:
+            raise serializers.ValidationError(
+                f'Severity must be one of: {", ".join(valid)}.'
+            )
+        return value
+
+
 class HealthProfileSerializer(serializers.ModelSerializer):
     """
     Serializer for HealthProfile with nested writable conditions/allergies.
-    Accepts and returns simple string lists for conditions and allergies.
+    Accepts/returns condition objects with severity and string lists for allergies.
     """
-    conditions = serializers.ListField(
-        child=serializers.CharField(max_length=100),
+    conditions = serializers.JSONField(
         required=False,
         default=list,
-        help_text='List of condition names, e.g. ["Diabetes", "Hypertension"]',
+        help_text='List of condition objects, e.g. [{"condition_name": "Diabetes", "severity": "moderate"}]',
     )
     allergies = serializers.ListField(
         child=serializers.CharField(max_length=100),
@@ -66,21 +84,53 @@ class HealthProfileSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError('Weight must be a positive number.')
         return value
 
+    def validate_conditions(self, value):
+        """
+        Validate list of condition objects (or fallback strings).
+        """
+        if not isinstance(value, list):
+            raise serializers.ValidationError('Conditions must be a list.')
+
+        validated = []
+        for item in value:
+            if isinstance(item, str):
+                item_name = item.strip()
+                if item_name:
+                    validated.append({
+                        'condition_name': item_name,
+                        'severity': 'moderate',
+                    })
+            elif isinstance(item, dict):
+                c_name = item.get('condition_name', '').strip()
+                severity = item.get('severity', 'moderate').lower()
+                if not c_name:
+                    raise serializers.ValidationError('Each condition must have a condition_name.')
+                if severity not in ['mild', 'moderate', 'severe']:
+                    raise serializers.ValidationError('Severity must be mild, moderate, or severe.')
+                validated.append({
+                    'condition_name': c_name,
+                    'severity': severity,
+                })
+            else:
+                raise serializers.ValidationError('Condition items must be objects or strings.')
+
+        return validated
+
     def create(self, validated_data):
         """
         Create a HealthProfile with its related conditions and allergies.
-        Translates flat string lists into related model rows.
         """
         conditions_data = validated_data.pop('conditions', [])
         allergies_data = validated_data.pop('allergies', [])
 
         profile = HealthProfile.objects.create(**validated_data)
 
-        # Create related condition rows
-        for condition_name in conditions_data:
+        # Create related condition rows with severity
+        for item in conditions_data:
             HealthCondition.objects.create(
                 profile=profile,
-                condition_name=condition_name,
+                condition_name=item['condition_name'],
+                severity=item['severity'],
             )
 
         # Create related allergy rows
@@ -94,8 +144,7 @@ class HealthProfileSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         """
-        Update a HealthProfile. For conditions and allergies, clear
-        old rows and recreate from the new list (replace strategy).
+        Update a HealthProfile. Replace strategy for conditions and allergies.
         """
         conditions_data = validated_data.pop('conditions', None)
         allergies_data = validated_data.pop('allergies', None)
@@ -108,10 +157,11 @@ class HealthProfileSerializer(serializers.ModelSerializer):
         # Replace conditions if provided in the request
         if conditions_data is not None:
             instance.conditions.all().delete()
-            for condition_name in conditions_data:
+            for item in conditions_data:
                 HealthCondition.objects.create(
                     profile=instance,
-                    condition_name=condition_name,
+                    condition_name=item['condition_name'],
+                    severity=item['severity'],
                 )
 
         # Replace allergies if provided in the request
@@ -127,11 +177,18 @@ class HealthProfileSerializer(serializers.ModelSerializer):
 
     def to_representation(self, instance):
         """
-        Convert related condition/allergy rows back to flat string lists
-        for the API response. We build the representation manually for
-        conditions/allergies to avoid the ListField trying to serialize
-        the related manager.
+        Convert related condition/allergy rows back to structured representation for API.
+        - conditions: list of {"condition_name": ..., "severity": ...}
+        - allergies: list of strings
         """
+        conditions_rep = [
+            {
+                'condition_name': c.condition_name,
+                'severity': c.severity,
+            }
+            for c in instance.conditions.all()
+        ]
+
         ret = {
             'id': instance.id,
             'profile_name': instance.profile_name,
@@ -140,9 +197,7 @@ class HealthProfileSerializer(serializers.ModelSerializer):
             'gender': instance.gender,
             'height_cm': instance.height_cm,
             'weight_kg': instance.weight_kg,
-            'conditions': list(
-                instance.conditions.values_list('condition_name', flat=True)
-            ),
+            'conditions': conditions_rep,
             'allergies': list(
                 instance.allergies.values_list('allergen_name', flat=True)
             ),

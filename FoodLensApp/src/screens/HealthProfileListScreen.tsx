@@ -137,11 +137,16 @@ const HealthProfileListScreen: React.FC<HealthProfileListScreenProps> = ({
           <View style={styles.tagsSection}>
             <Text style={styles.tagsLabel}>Conditions</Text>
             <View style={styles.tagsRow}>
-              {item.conditions.map((c, i) => (
-                <View key={i} style={styles.tagChip}>
-                  <Text style={styles.tagText}>{c}</Text>
-                </View>
-              ))}
+              {item.conditions.map((c: any, i: number) => {
+                const name = typeof c === 'string' ? c : c.condition_name;
+                const severity = typeof c === 'string' ? 'moderate' : (c.severity || 'moderate');
+                const formattedSeverity = severity.charAt(0).toUpperCase() + severity.slice(1);
+                return (
+                  <View key={i} style={styles.tagChip}>
+                    <Text style={styles.tagText}>{name} ({formattedSeverity})</Text>
+                  </View>
+                );
+              })}
             </View>
           </View>
         ) : null}

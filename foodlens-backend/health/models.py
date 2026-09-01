@@ -75,17 +75,28 @@ class HealthProfile(models.Model):
 class HealthCondition(models.Model):
     """
     A chronic health condition linked to a HealthProfile.
-    e.g., "Diabetes", "Hypertension"
+    e.g., "Diabetes", "Hypertension" with a severity rating.
     """
+    SEVERITY_CHOICES = [
+        ('mild', 'Mild'),
+        ('moderate', 'Moderate'),
+        ('severe', 'Severe'),
+    ]
+
     profile = models.ForeignKey(
         HealthProfile,
         on_delete=models.CASCADE,
         related_name='conditions',
     )
     condition_name = models.CharField(max_length=100)
+    severity = models.CharField(
+        max_length=10,
+        choices=SEVERITY_CHOICES,
+        default='moderate',
+    )
 
     def __str__(self):
-        return self.condition_name
+        return f"{self.condition_name} ({self.severity})"
 
 
 class Allergy(models.Model):

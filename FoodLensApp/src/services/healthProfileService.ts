@@ -5,6 +5,13 @@
 
 import apiClient from './apiClient';
 
+export type SeverityLevel = 'mild' | 'moderate' | 'severe';
+
+export interface ConditionItem {
+  condition_name: string;
+  severity: SeverityLevel;
+}
+
 export interface HealthProfile {
   id: number;
   profile_name: string;
@@ -13,7 +20,7 @@ export interface HealthProfile {
   gender: string;
   height_cm: number | null;
   weight_kg: number | null;
-  conditions: string[];
+  conditions: ConditionItem[];
   allergies: string[];
   created_at: string;
   updated_at: string;
@@ -26,7 +33,7 @@ export interface HealthProfilePayload {
   gender: string;
   height_cm?: number | null;
   weight_kg?: number | null;
-  conditions?: string[];
+  conditions?: ConditionItem[];
   allergies?: string[];
 }
 
