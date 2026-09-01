@@ -9,7 +9,7 @@ import {Colors} from '../theme/colors';
 import {FontFamily, FontSize} from '../theme/typography';
 import {BorderRadius, Spacing} from '../theme/spacing';
 
-export type RiskLevel = 'low' | 'moderate' | 'high';
+export type RiskLevel = 'low' | 'moderate' | 'high' | 'unknown';
 
 interface RiskBadgeProps {
   level: RiskLevel;
@@ -38,6 +38,12 @@ const RISK_CONFIG: Record<
     bg: Colors.riskHigh.bg,
     text: Colors.riskHigh.text,
     dot: Colors.riskHigh.accent,
+  },
+  unknown: {
+    label: 'Unrecognized Data',
+    bg: '#ECEFF1',
+    text: '#546E7A',
+    dot: '#78909C',
   },
 };
 

@@ -8,7 +8,7 @@ import {View, Text, StyleSheet, TouchableOpacity} from 'react-native';
 import {createBottomTabNavigator} from '@react-navigation/bottom-tabs';
 import HomeScreen from '../screens/HomeScreen';
 import HistoryScreen from '../screens/HistoryScreen';
-import ScanScreen from '../screens/ScanScreen';
+import ScanNavigator from './ScanNavigator';
 import ProfileNavigator from './ProfileNavigator';
 import MoreScreen from '../screens/MoreScreen';
 import {Colors} from '../theme/colors';
@@ -93,7 +93,7 @@ const BottomTabNavigator: React.FC = () => {
       />
       <Tab.Screen
         name="Scan"
-        component={ScanScreen}
+        component={ScanNavigator}
         options={{
           tabBarIcon: ({focused}) => (
             <TabIcon name="Scan" focused={focused} isScan />
