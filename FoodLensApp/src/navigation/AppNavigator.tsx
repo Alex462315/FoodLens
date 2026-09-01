@@ -1,22 +1,72 @@
 /**
  * AppNavigator — Root navigator that switches between:
  * - AuthNavigator (Landing/Register/Login) when not logged in
- * - BottomTabNavigator (Dashboard + tabs) when logged in
- *
- * Shows a loading screen while checking for a stored token.
+ * - MainNavigator (Bottom tabs + modal screens) when logged in
  */
 
 import React from 'react';
 import {View, ActivityIndicator, StyleSheet} from 'react-native';
+import {createNativeStackNavigator} from '@react-navigation/native-stack';
 import AuthNavigator from './AuthNavigator';
 import BottomTabNavigator from './BottomTabNavigator';
+import NutritionSummaryScreen from '../screens/NutritionSummaryScreen';
+import ProductCompareScreen from '../screens/ProductCompareScreen';
+import CommunitySubmitScreen from '../screens/CommunitySubmitScreen';
+import AnalyticsScreen from '../screens/AnalyticsScreen';
 import {useAuth} from '../context/AuthContext';
 import {Colors} from '../theme/colors';
+
+const Stack = createNativeStackNavigator();
+
+const MainNavigator: React.FC = () => (
+  <Stack.Navigator screenOptions={{headerShown: false}}>
+    <Stack.Screen name="Tabs" component={BottomTabNavigator} />
+    <Stack.Screen
+      name="NutritionSummary"
+      component={NutritionSummaryScreen}
+      options={{
+        headerShown: true,
+        title: 'Nutrition Tracker',
+        headerBackTitle: 'Back',
+        headerTintColor: Colors.primaryGreen,
+      }}
+    />
+    <Stack.Screen
+      name="ProductCompare"
+      component={ProductCompareScreen}
+      options={{
+        headerShown: true,
+        title: 'Compare Products',
+        headerBackTitle: 'Back',
+        headerTintColor: Colors.primaryGreen,
+      }}
+    />
+    <Stack.Screen
+      name="CommunitySubmit"
+      component={CommunitySubmitScreen}
+      options={{
+        headerShown: true,
+        title: 'Submit Missing Product',
+        headerBackTitle: 'Back',
+        headerTintColor: Colors.primaryGreen,
+      }}
+    />
+    <Stack.Screen
+      name="Analytics"
+      component={AnalyticsScreen}
+      options={{
+        headerShown: true,
+        title: 'My Scan Analytics',
+        headerBackTitle: 'Back',
+        headerTintColor: Colors.primaryGreen,
+      }}
+    />
+  </Stack.Navigator>
+);
 
 const AppNavigator: React.FC = () => {
   const {token, isLoading} = useAuth();
 
-  // Show loading spinner while checking stored auth
   if (isLoading) {
     return (
       <View style={styles.loadingContainer}>
@@ -25,8 +75,7 @@ const AppNavigator: React.FC = () => {
     );
   }
 
-  // If token exists → show main app; otherwise → show auth flow
-  return token ? <BottomTabNavigator /> : <AuthNavigator />;
+  return token ? <MainNavigator /> : <AuthNavigator />;
 };
 
 const styles = StyleSheet.create({

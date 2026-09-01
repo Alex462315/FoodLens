@@ -17,6 +17,7 @@ interface HealthRiskScoreGaugeProps {
   size?: number;
   strokeWidth?: number;
   showLabel?: boolean;
+  overrideRiskLevel?: RiskLevel;
 }
 
 const HealthRiskScoreGauge: React.FC<HealthRiskScoreGaugeProps> = ({
@@ -24,9 +25,10 @@ const HealthRiskScoreGauge: React.FC<HealthRiskScoreGaugeProps> = ({
   size = 140,
   strokeWidth = 12,
   showLabel = true,
+  overrideRiskLevel,
 }) => {
   const clampedScore = Math.max(0, Math.min(100, score));
-  const riskLevel = getRiskLevel(clampedScore);
+  const riskLevel = overrideRiskLevel || getRiskLevel(clampedScore);
   const activeColor = getRiskColor(riskLevel);
 
   const radius = (size - strokeWidth) / 2;
@@ -42,6 +44,7 @@ const HealthRiskScoreGauge: React.FC<HealthRiskScoreGaugeProps> = ({
     low: 'Low Risk',
     moderate: 'Moderate Risk',
     high: 'High Risk',
+    unknown: 'Unrecognized Data',
   };
 
   // Risk label color
@@ -49,6 +52,7 @@ const HealthRiskScoreGauge: React.FC<HealthRiskScoreGaugeProps> = ({
     low: Colors.riskLow.text,
     moderate: Colors.riskModerate.text,
     high: Colors.riskHigh.text,
+    unknown: '#546E7A',
   };
 
   return (
@@ -83,7 +87,7 @@ const HealthRiskScoreGauge: React.FC<HealthRiskScoreGaugeProps> = ({
         {/* Centered score number */}
         <View style={styles.scoreOverlay}>
           <Text style={[styles.scoreText, {color: activeColor}]}>
-            {clampedScore}
+            {riskLevel === 'unknown' ? '?' : clampedScore}
           </Text>
         </View>
       </View>
