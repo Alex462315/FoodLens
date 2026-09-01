@@ -1,7 +1,9 @@
 """
 Products app — URL configuration
-Routes will be added in later phases.
 """
 from django.urls import path
+from .views import product_lookup
 
-urlpatterns = []
+urlpatterns = [
+    path('lookup/', product_lookup, name='product-lookup'),
+]
