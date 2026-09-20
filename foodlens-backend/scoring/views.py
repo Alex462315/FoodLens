@@ -144,7 +144,16 @@ def compute_score_view(request):
         'product_image_url': request.data.get('product_image_url', ''),
         'nutrition_data': request.data.get('nutrition', {}),
     }
-    result = compute_score(ingredients_data, profile, product_meta=product_meta)
+
+    try:
+        result = compute_score(ingredients_data, profile, product_meta=product_meta)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return Response(
+            {'error': f'Scoring computation failed: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
 
     return Response(result, status=status.HTTP_200_OK)
 
@@ -173,23 +182,71 @@ def scan_history_view(request):
             ...
         ]
     """
-    from .models import ScoredResult
+    from .models import ScoredResult, ScoredIngredientDetail
 
     scans = ScoredResult.objects.filter(
         profile__user=request.user
-    ).order_by('-created_at').values(
-        'id',
-        'barcode',
-        'product_name',
-        'product_image_url',
-        'normalized_score',
-        'risk_label',
-        'has_allergen_warning',
-        'allergen_details',
-        'created_at',
-    )[:50]  # Limit to last 50 scans
+    ).order_by('-created_at')[:50]
 
-    return Response(list(scans), status=status.HTTP_200_OK)
+    result = []
+    for s in scans:
+        result.append({
+            'id': s.id,
+            'barcode': s.barcode,
+            'product_name': s.product_name,
+            'product_image_url': s.product_image_url,
+            'normalized_score': str(s.normalized_score),
+            'risk_label': s.risk_label,
+            'has_allergen_warning': s.has_allergen_warning,
+            'allergen_details': s.allergen_details,
+            'nutrition_data': s.nutrition_data or {},
+            'created_at': s.created_at.isoformat(),
+        })
+
+    return Response(result, status=status.HTTP_200_OK)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def scan_detail_view(request, pk):
+    """
+    GET /api/scoring/history/<id>/
+
+    Returns the full detail of a single past scan — including
+    nutrition_data and ingredient_breakdown — so the HistoryScreen
+    can navigate to a re-rendered ProductResultScreen.
+    """
+    from .models import ScoredResult, ScoredIngredientDetail
+
+    try:
+        scan = ScoredResult.objects.get(pk=pk, profile__user=request.user)
+    except ScoredResult.DoesNotExist:
+        return Response({'error': 'Scan not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    breakdown = []
+    for d in ScoredIngredientDetail.objects.filter(scored_result=scan).select_related('ingredient'):
+        breakdown.append({
+            'original_name': d.original_name,
+            'matched_name': d.ingredient.name if d.ingredient else None,
+            'category': d.ingredient.category if d.ingredient else None,
+            'position': d.position,
+            'adjusted_risk_score': float(d.adjusted_risk_score),
+        })
+
+    return Response({
+        'id': scan.id,
+        'barcode': scan.barcode,
+        'product_name': scan.product_name,
+        'product_image_url': scan.product_image_url,
+        'normalized_score': float(scan.normalized_score),
+        'risk_label': scan.risk_label,
+        'has_allergen_warning': scan.has_allergen_warning,
+        'allergen_details': scan.allergen_details,
+        'nutrition_data': scan.nutrition_data or {},
+        'ingredient_breakdown': breakdown,
+        'created_at': scan.created_at.isoformat(),
+    }, status=status.HTTP_200_OK)
+
 
 
 @api_view(['GET'])
@@ -306,6 +363,7 @@ def nutrition_summary_view(request):
     return Response({
         'period': period,
         'scan_count': scan_count,
+        'total_scans_in_period': scans.count(),   # includes scans without nutrition
         'totals': {k: round(v, 2) for k, v in totals.items()},
         'averages': averages,
         'daily_breakdown': daily_breakdown,
@@ -418,3 +476,104 @@ def community_submit_view(request):
             'It will be added to the FoodLens ingredient database after verification.'
         ),
     }, status=status.HTTP_201_CREATED)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OCR Extraction Endpoint
+# ─────────────────────────────────────────────────────────────────────────────
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def ocr_extract_view(request):
+    """
+    POST /api/scoring/ocr-extract/
+
+    Accepts a multipart image upload of a food product ingredient label.
+    Runs preprocessing (grayscale → CLAHE → deskew → binarize) then
+    Tesseract OCR, and returns the extracted text with a real confidence score.
+
+    Request (multipart/form-data):
+        image: <file>   — JPEG/PNG photo of ingredient label
+
+    Response:
+        {
+            "raw_text":   "Sugar, Salt, Water, ...",
+            "confidence": 82         ← genuine per-word average from Tesseract
+        }
+
+    The caller should feed raw_text directly into /api/scoring/parse-ingredients/
+    using the same flow as the barcode path.
+
+    Error responses:
+        400 — no image in request, or image cannot be decoded
+        503 — Tesseract binary not found / OCR library error
+    """
+    from .ocr_service import extract_text_from_image
+
+    # ── Validate upload ───────────────────────────────────────────────────────
+    image_file = request.FILES.get('image')
+    if not image_file:
+        return Response(
+            {'error': 'No image provided. Send a multipart/form-data request with an "image" field.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    allowed_types = {'image/jpeg', 'image/png', 'image/webp', 'image/bmp', 'image/tiff'}
+    if image_file.content_type not in allowed_types:
+        return Response(
+            {'error': f'Unsupported image type: {image_file.content_type}. Use JPEG or PNG.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    max_size_bytes = 15 * 1024 * 1024  # 15 MB
+    if image_file.size > max_size_bytes:
+        return Response(
+            {'error': 'Image too large. Maximum allowed size is 15 MB.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # ── Run OCR ───────────────────────────────────────────────────────────────
+    try:
+        image_bytes = image_file.read()
+        result = extract_text_from_image(image_bytes)
+    except FileNotFoundError as e:
+        # Tesseract binary missing or wrong path
+        return Response(
+            {
+                'error': 'OCR engine not available. Tesseract binary not found.',
+                'detail': str(e),
+            },
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+    except Exception as e:
+        return Response(
+            {
+                'error': 'OCR processing failed.',
+                'detail': str(e),
+            },
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+    # ── Return result ─────────────────────────────────────────────────────────
+    raw_text = result['raw_text']
+    confidence = result['confidence']
+
+    if not raw_text:
+        return Response(
+            {
+                'raw_text': '',
+                'confidence': 0,
+                'warning': 'No text could be extracted from this image. '
+                           'Try retaking the photo with better lighting and a steady hand.',
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    return Response(
+        {
+            'raw_text': raw_text,
+            'confidence': confidence,
+        },
+        status=status.HTTP_200_OK,
+    )
+

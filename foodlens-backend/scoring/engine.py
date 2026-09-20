@@ -32,18 +32,20 @@ SEVERITY_WEIGHT = {
 }
 
 # Normalization ceiling for raw_score -> 0-100.
-# Rationale: The harmonic series for 10 ingredients sums to ~2.93.
-# A "very unhealthy" product with average risk ~8 across 10 ingredients
-# would produce raw_score ~23.4. Setting ceiling to 25 means:
-#   - Healthy product (avg risk ~2):    ~23/100
-#   - Moderate product (avg risk ~5):   ~59/100
-#   - Unhealthy product (avg risk ~7):  ~82/100
-#   - Terrible product (avg risk ~9):   ~100/100  (clamped)
-NORMALIZATION_CEILING = Decimal('25')
+# Calibration rationale (updated):
+#   The harmonic series for positions 1..10 = 1 + 0.5 + 0.33 + 0.25 + ... ≈ 2.93
+#   For a diabetic eating Nutella (sugar at pos1, risk=9 after multiplier):
+#     raw ≈ 9*1 + 5*0.5 + 3*0.33 + ... ≈ 12-15
+#   Setting ceiling=15 makes the scale meaningful:
+#     - Very healthy product (avg risk ~1, 8 ingredients): raw ≈ 2.3  → ~15/100  (Low)
+#     - Moderate product    (avg risk ~4, 8 ingredients): raw ≈ 9.3  → ~62/100  (Moderate)
+#     - Unhealthy product   (avg risk ~7, 8 ingredients): raw ≈ 16.3 → ~100/100 (High, clamped)
+#     - Nutella for Diabetic (sugar adj=9 at pos1):       raw ≈ 10.5 → ~70/100  (High) ✓
+NORMALIZATION_CEILING = Decimal('15')
 
 # Risk label thresholds
 RISK_THRESHOLDS = {
-    'low': Decimal('35'),       # 0-35: Low risk
+    'low': Decimal('35'),       # 0-35:  Low risk
     'moderate': Decimal('65'),  # 36-65: Moderate risk
     # 66-100: High risk
 }
