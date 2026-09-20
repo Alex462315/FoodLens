@@ -1,6 +1,6 @@
 /**
  * ScanNavigator — Stack navigator for the Scan tab
- * ScanScreen (Camera) → ProductResultScreen → AIExplanationScreen
+ * ScanScreen (Camera) → OCRReviewScreen → ProductResultScreen → AIExplanationScreen
  */
 
 import React from 'react';
@@ -8,6 +8,7 @@ import {createNativeStackNavigator} from '@react-navigation/native-stack';
 import ScanScreen from '../screens/ScanScreen';
 import ProductResultScreen from '../screens/ProductResultScreen';
 import AIExplanationScreen from '../screens/AIExplanationScreen';
+import OCRReviewScreen from '../screens/OCRReviewScreen';
 import {Colors} from '../theme/colors';
 import {FontFamily} from '../theme/typography';
 
@@ -32,6 +33,14 @@ const ScanNavigator: React.FC = () => {
         name="ScanScreen"
         component={ScanScreen}
         options={{headerShown: false}}
+      />
+      <Stack.Screen
+        name="OCRReviewScreen"
+        component={OCRReviewScreen}
+        options={{
+          title: 'Review Scan',
+          headerShown: false,  // OCRReviewScreen has its own header with back button
+        }}
       />
       <Stack.Screen
         name="ProductResultScreen"

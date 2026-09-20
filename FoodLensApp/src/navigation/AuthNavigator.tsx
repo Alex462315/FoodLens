@@ -8,6 +8,7 @@ import {createNativeStackNavigator} from '@react-navigation/native-stack';
 import LandingScreen from '../screens/LandingScreen';
 import RegisterScreen from '../screens/RegisterScreen';
 import LoginScreen from '../screens/LoginScreen';
+import ForgotPasswordScreen from '../screens/ForgotPasswordScreen';
 import {Colors} from '../theme/colors';
 import {FontFamily} from '../theme/typography';
 
@@ -15,6 +16,7 @@ export type AuthStackParamList = {
   Landing: undefined;
   Register: undefined;
   Login: undefined;
+  ForgotPassword: undefined;
 };
 
 const Stack = createNativeStackNavigator<AuthStackParamList>();
@@ -52,6 +54,13 @@ const AuthNavigator: React.FC = () => {
         component={LoginScreen}
         options={{
           title: 'Log In',
+        }}
+      />
+      <Stack.Screen
+        name="ForgotPassword"
+        component={ForgotPasswordScreen}
+        options={{
+          title: 'Reset Password',
         }}
       />
     </Stack.Navigator>
