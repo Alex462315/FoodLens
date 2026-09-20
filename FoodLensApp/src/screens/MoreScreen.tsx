@@ -17,6 +17,7 @@ import {useNavigation} from '@react-navigation/native';
 import {Colors} from '../theme/colors';
 import {FontFamily, FontSize} from '../theme/typography';
 import {Spacing, BorderRadius, Shadow} from '../theme/spacing';
+import {useAuth} from '../context/AuthContext';
 
 interface MenuItemProps {
   icon: string;
@@ -48,6 +49,8 @@ const MenuItem: React.FC<MenuItemProps> = ({icon, title, subtitle, onPress, badg
 
 const MoreScreen: React.FC = () => {
   const navigation = useNavigation<any>();
+  const {user} = useAuth();
+  const isStaff = user?.is_staff ?? false;
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -78,20 +81,36 @@ const MoreScreen: React.FC = () => {
           />
           <View style={styles.divider} />
           <MenuItem
-            icon="📈"
-            title="Scan Analytics"
-            subtitle="Most flagged ingredients & your scan score trends"
-            badge="NEW"
-            onPress={() => navigation.navigate('Analytics')}
-          />
-          <View style={styles.divider} />
-          <MenuItem
             icon="📋"
             title="Scan History"
             subtitle="View all your past product scans"
             onPress={() => navigation.navigate('History')}
           />
         </View>
+
+        {/* Admin Analytics — only visible to is_staff users */}
+        {isStaff && (
+          <>
+            <Text style={styles.sectionLabel}>ADMINISTRATION</Text>
+            <View style={styles.menuCard}>
+              <MenuItem
+                icon="📊"
+                title="Admin Analytics"
+                subtitle="Aggregate stats, flagged ingredients across all users"
+                badge="ADMIN"
+                onPress={() => navigation.navigate('Analytics')}
+              />
+              <View style={styles.divider} />
+              <MenuItem
+                icon="👥"
+                title="User Management"
+                subtitle="View all users, delete accounts"
+                badge="ADMIN"
+                onPress={() => navigation.navigate('AdminUsers')}
+              />
+            </View>
+          </>
+        )}
 
         {/* Community */}
         <Text style={styles.sectionLabel}>COMMUNITY</Text>
@@ -108,6 +127,13 @@ const MoreScreen: React.FC = () => {
         {/* App */}
         <Text style={styles.sectionLabel}>APP</Text>
         <View style={styles.menuCard}>
+          <MenuItem
+            icon="⚙️"
+            title="Settings"
+            subtitle="Change password & app preferences"
+            onPress={() => navigation.navigate('Settings')}
+          />
+          <View style={styles.divider} />
           <MenuItem
             icon="👤"
             title="My Health Profile"

@@ -41,6 +41,7 @@ type Period = 'daily' | 'weekly' | 'monthly';
 interface NutritionSummary {
   period: Period;
   scan_count: number;
+  total_scans_in_period: number;
   totals: Record<string, number>;
   averages: Record<string, number>;
   daily_breakdown: Array<{date: string; scan_count: number; [key: string]: any}>;
@@ -128,10 +129,27 @@ const NutritionSummaryScreen: React.FC = () => {
       ) : !data || data.scan_count === 0 ? (
         <View style={styles.centerContainer}>
           <Text style={styles.emptyIcon}>📊</Text>
-          <Text style={styles.emptyTitle}>No nutrition data {periodLabel}</Text>
-          <Text style={styles.emptyText}>
-            Scan products with nutritional information to see your consumption trends.
-          </Text>
+          {data && data.total_scans_in_period > 0 ? (
+            // Scans exist but none have nutrition data (older scans pre-fix)
+            <>
+              <Text style={styles.emptyTitle}>No nutrition data {periodLabel}</Text>
+              <Text style={styles.emptyText}>
+                You have {data.total_scans_in_period} scan
+                {data.total_scans_in_period > 1 ? 's' : ''} this period, but
+                none contain nutritional information yet. Re-scan a barcode
+                product to start tracking nutrition.
+              </Text>
+            </>
+          ) : (
+            // No scans at all
+            <>
+              <Text style={styles.emptyTitle}>No scans {periodLabel}</Text>
+              <Text style={styles.emptyText}>
+                Scan a barcode product (e.g. Nutella, Lays, Britannia) to
+                start tracking your nutritional intake.
+              </Text>
+            </>
+          )}
         </View>
       ) : (
         <ScrollView

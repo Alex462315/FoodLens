@@ -1,9 +1,10 @@
 /**
  * HealthProfileFormScreen — Create or Edit a health profile.
  * Shared form: mode "create" shows empty, mode "edit" shows pre-filled.
+ * Includes severity selector for health conditions (Mild / Moderate / Severe).
  */
 
-import React, {useState} from 'react';
+import React, {useState, useEffect} from 'react';
 import {
   View,
   Text,
@@ -17,13 +18,16 @@ import {
 } from 'react-native';
 import {Colors} from '../theme/colors';
 import {Typography, FontFamily, FontSize} from '../theme/typography';
-import {Spacing, BorderRadius, Shadow} from '../theme/spacing';
+import {Spacing, BorderRadius} from '../theme/spacing';
 import {PrimaryButton, FormInput} from '../components';
 import {
   HealthProfile,
   HealthProfilePayload,
+  ConditionItem,
+  SeverityLevel,
   createHealthProfile,
   updateHealthProfile,
+  getSupportedConditions,
 } from '../services/healthProfileService';
 import {AxiosError} from 'axios';
 
@@ -39,6 +43,37 @@ interface HealthProfileFormScreenProps {
 
 const RELATION_OPTIONS = ['self', 'parent', 'sibling', 'child', 'spouse', 'other'];
 const GENDER_OPTIONS = ['male', 'female', 'other'];
+const SEVERITY_OPTIONS: {label: string; value: SeverityLevel}[] = [
+  {label: 'Mild', value: 'mild'},
+  {label: 'Moderate', value: 'moderate'},
+  {label: 'Severe', value: 'severe'},
+];
+
+// Fallback hardcoded list matching ConditionMultiplier DB keys exactly.
+// The app fetches the live list from the backend but uses this if the API is offline.
+const FALLBACK_CONDITIONS: {name: string; icon: string; description: string}[] = [
+  {name: 'Diabetes', icon: '🩸', description: 'Type 1 or Type 2 Diabetes / insulin resistance'},
+  {name: 'Hypertension', icon: '❤️', description: 'High blood pressure'},
+  {name: 'Heart Disease', icon: '🫀', description: 'Coronary artery disease or related conditions'},
+  {name: 'Obesity', icon: '⚖️', description: 'BMI ≥ 30, or doctor-diagnosed obesity'},
+  {name: 'Kidney Disease', icon: '🫘', description: 'Chronic kidney disease (CKD)'},
+  {name: 'Celiac Disease', icon: '🌾', description: 'Gluten intolerance / celiac disease'},
+  {name: 'ADHD', icon: '🧠', description: 'ADHD (sensitivity to artificial colors)'},
+];
+
+// Helper to normalize condition input (supports old string or new object format)
+const normalizeConditions = (rawConditions?: any[]): ConditionItem[] => {
+  if (!rawConditions || !Array.isArray(rawConditions)) return [];
+  return rawConditions.map(item => {
+    if (typeof item === 'string') {
+      return {condition_name: item, severity: 'moderate'};
+    }
+    return {
+      condition_name: item.condition_name || item.name || '',
+      severity: (item.severity as SeverityLevel) || 'moderate',
+    };
+  });
+};
 
 const HealthProfileFormScreen: React.FC<HealthProfileFormScreenProps> = ({
   navigation,
@@ -58,18 +93,52 @@ const HealthProfileFormScreen: React.FC<HealthProfileFormScreenProps> = ({
   const [weightKg, setWeightKg] = useState(
     profile?.weight_kg?.toString() || '',
   );
-  const [conditions, setConditions] = useState<string[]>(
-    profile?.conditions || [],
+  const [conditions, setConditions] = useState<ConditionItem[]>(
+    normalizeConditions(profile?.conditions),
   );
   const [allergies, setAllergies] = useState<string[]>(
     profile?.allergies || [],
   );
-  const [newCondition, setNewCondition] = useState('');
+
+  // Controlled condition picker: no free-text — only supported canonical names.
+  const [supportedConditions, setSupportedConditions] = useState(FALLBACK_CONDITIONS);
+  // Per-condition pending severity before it is "confirmed" to the list.
+  const [pendingSeverity, setPendingSeverity] = useState<Record<string, SeverityLevel>>({});
   const [newAllergy, setNewAllergy] = useState('');
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [generalError, setGeneralError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  // Fetch the canonical condition list from the backend on mount.
+  useEffect(() => {
+    getSupportedConditions()
+      .then(list => setSupportedConditions(list))
+      .catch(() => { /* Fallback list already set */ });
+  }, []);
+
+  // Toggle a condition on/off. When turning on, default severity = moderate.
+  const toggleCondition = (name: string) => {
+    const exists = conditions.find(c => c.condition_name === name);
+    if (exists) {
+      // Remove
+      setConditions(conditions.filter(c => c.condition_name !== name));
+      setPendingSeverity(prev => { const p = {...prev}; delete p[name]; return p; });
+    } else {
+      // Add with moderate by default
+      const sev: SeverityLevel = pendingSeverity[name] ?? 'moderate';
+      setConditions([...conditions, {condition_name: name, severity: sev}]);
+      setPendingSeverity(prev => ({...prev, [name]: sev}));
+    }
+  };
+
+  // Update severity of an already-selected condition.
+  const updateSeverity = (name: string, sev: SeverityLevel) => {
+    setPendingSeverity(prev => ({...prev, [name]: sev}));
+    setConditions(conditions.map(c =>
+      c.condition_name === name ? {...c, severity: sev} : c
+    ));
+  };
 
   const validate = (): boolean => {
     const newErrors: Record<string, string> = {};
@@ -154,13 +223,7 @@ const HealthProfileFormScreen: React.FC<HealthProfileFormScreenProps> = ({
     }
   };
 
-  const addCondition = () => {
-    const trimmed = newCondition.trim();
-    if (trimmed && !conditions.includes(trimmed)) {
-      setConditions([...conditions, trimmed]);
-    }
-    setNewCondition('');
-  };
+  // addCondition replaced by toggleCondition above (controlled picker).
 
   const removeCondition = (index: number) => {
     setConditions(conditions.filter((_, i) => i !== index));
@@ -204,50 +267,6 @@ const HealthProfileFormScreen: React.FC<HealthProfileFormScreenProps> = ({
             </Text>
           </TouchableOpacity>
         ))}
-      </View>
-    </View>
-  );
-
-  const renderTagInput = (
-    label: string,
-    tags: string[],
-    inputValue: string,
-    onChangeInput: (text: string) => void,
-    onAdd: () => void,
-    onRemove: (index: number) => void,
-    isAllergy?: boolean,
-  ) => (
-    <View style={styles.tagInputContainer}>
-      <Text style={styles.pickerLabel}>{label}</Text>
-      {tags.length > 0 && (
-        <View style={styles.tagsRow}>
-          {tags.map((tag, index) => (
-            <TouchableOpacity
-              key={index}
-              style={[styles.tag, isAllergy && styles.allergyTag]}
-              onPress={() => onRemove(index)}>
-              <Text style={[styles.tagLabel, isAllergy && styles.allergyLabel]}>
-                {tag} ✕
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      )}
-      <View style={styles.tagInputRow}>
-        <View style={styles.tagInputField}>
-          <FormInput
-            label=""
-            placeholder={`Add ${label.toLowerCase().slice(0, -1)}...`}
-            value={inputValue}
-            onChangeText={onChangeInput}
-            onSubmitEditing={onAdd}
-            returnKeyType="done"
-            containerStyle={styles.tagInputWrapper}
-          />
-        </View>
-        <TouchableOpacity style={styles.addButton} onPress={onAdd}>
-          <Text style={styles.addButtonText}>Add</Text>
-        </TouchableOpacity>
       </View>
     </View>
   );
@@ -346,28 +365,125 @@ const HealthProfileFormScreen: React.FC<HealthProfileFormScreenProps> = ({
             </View>
           </View>
 
-          {/* Conditions */}
-          {renderTagInput(
-            'Conditions',
-            conditions,
-            newCondition,
-            setNewCondition,
-            addCondition,
-            removeCondition,
-          )}
+          {/* ── Conditions Section — Controlled Chip Picker ── */}
+          <View style={styles.tagInputContainer}>
+            <Text style={styles.pickerLabel}>Health Conditions</Text>
+            <Text style={styles.pickerHint}>
+              Tap a condition to select it, then choose severity.
+            </Text>
 
-          {/* Allergies */}
-          {renderTagInput(
-            'Allergies',
-            allergies,
-            newAllergy,
-            setNewAllergy,
-            addAllergy,
-            removeAllergy,
-            true,
-          )}
+            {supportedConditions.map(cond => {
+              const selected = conditions.find(
+                c => c.condition_name === cond.name,
+              );
+              const currentSev: SeverityLevel =
+                selected?.severity ??
+                pendingSeverity[cond.name] ??
+                'moderate';
+              return (
+                <View key={cond.name} style={styles.conditionCard}>
+                  {/* Condition toggle row */}
+                  <TouchableOpacity
+                    style={[
+                      styles.conditionRow,
+                      selected && styles.conditionRowSelected,
+                    ]}
+                    onPress={() => toggleCondition(cond.name)}
+                    activeOpacity={0.75}>
+                    <Text style={styles.conditionIcon}>{cond.icon}</Text>
+                    <View style={styles.conditionTextBlock}>
+                      <Text
+                        style={[
+                          styles.conditionName,
+                          selected && styles.conditionNameSelected,
+                        ]}>
+                        {cond.name}
+                      </Text>
+                      <Text style={styles.conditionDesc}>
+                        {cond.description}
+                      </Text>
+                    </View>
+                    <View
+                      style={[
+                        styles.conditionCheckbox,
+                        selected && styles.conditionCheckboxSelected,
+                      ]}>
+                      {selected && (
+                        <Text style={styles.conditionCheckmark}>✓</Text>
+                      )}
+                    </View>
+                  </TouchableOpacity>
 
-          {/* Submit */}
+                  {/* Severity row — only shown when condition is selected */}
+                  {selected && (
+                    <View style={styles.severityRow}>
+                      <Text style={styles.severityLabel}>Severity:</Text>
+                      <View style={styles.severityOptions}>
+                        {SEVERITY_OPTIONS.map(opt => (
+                          <TouchableOpacity
+                            key={opt.value}
+                            style={[
+                              styles.severityChip,
+                              currentSev === opt.value &&
+                                styles.severityChipSelected,
+                            ]}
+                            onPress={() =>
+                              updateSeverity(cond.name, opt.value)
+                            }>
+                            <Text
+                              style={[
+                                styles.severityText,
+                                currentSev === opt.value &&
+                                  styles.severityTextSelected,
+                              ]}>
+                              {opt.label}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    </View>
+                  )}
+                </View>
+              );
+            })}
+          </View>
+
+          {/* Allergies Section */}
+          <View style={styles.tagInputContainer}>
+            <Text style={styles.pickerLabel}>Allergies</Text>
+            {allergies.length > 0 && (
+              <View style={styles.tagsRow}>
+                {allergies.map((allergy, index) => (
+                  <TouchableOpacity
+                    key={index}
+                    style={[styles.tag, styles.allergyTag]}
+                    onPress={() => removeAllergy(index)}>
+                    <Text style={[styles.tagLabel, styles.allergyLabel]}>
+                      {allergy} ✕
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+            <View style={styles.tagInputRow}>
+              <View style={styles.tagInputField}>
+                <FormInput
+                  label=""
+                  placeholder="Add allergy (e.g. Peanuts)..."
+                  value={newAllergy}
+                  onChangeText={setNewAllergy}
+                  onSubmitEditing={addAllergy}
+                  returnKeyType="done"
+                  containerStyle={styles.tagInputWrapper}
+                />
+              </View>
+              <TouchableOpacity style={styles.addButton} onPress={addAllergy}>
+                <Text style={styles.addButtonText}>Add</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {/* Submit Button */}
           <PrimaryButton
             title={isEdit ? 'Update Profile' : 'Create Profile'}
             onPress={handleSubmit}
@@ -466,7 +582,7 @@ const styles = StyleSheet.create({
     color: Colors.white,
   },
 
-  // Tag Input
+  // Tag Input & Severity Selector
   tagInputContainer: {
     marginBottom: Spacing.base,
   },
@@ -494,6 +610,50 @@ const styles = StyleSheet.create({
   allergyLabel: {
     color: Colors.redDark,
   },
+  conditionInputContainer: {
+    backgroundColor: Colors.surface,
+    padding: Spacing.md,
+    borderRadius: BorderRadius.lg,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    marginBottom: Spacing.sm,
+  },
+  severityRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: Spacing.sm,
+    marginBottom: Spacing.md,
+  },
+  severityLabel: {
+    fontFamily: FontFamily.medium,
+    fontSize: FontSize.caption,
+    color: Colors.secondaryText,
+    marginRight: Spacing.sm,
+  },
+  severityOptions: {
+    flexDirection: 'row',
+    gap: Spacing.xs,
+  },
+  severityChip: {
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.xs,
+    borderRadius: BorderRadius.full,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.background,
+  },
+  severityChipSelected: {
+    backgroundColor: Colors.primaryGreen,
+    borderColor: Colors.primaryGreen,
+  },
+  severityText: {
+    fontFamily: FontFamily.medium,
+    fontSize: FontSize.caption,
+    color: Colors.secondaryText,
+  },
+  severityTextSelected: {
+    color: Colors.white,
+  },
   tagInputRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -504,6 +664,13 @@ const styles = StyleSheet.create({
   },
   tagInputWrapper: {
     marginBottom: 0,
+  },
+  addButtonFull: {
+    backgroundColor: Colors.primaryGreen,
+    paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   addButton: {
     backgroundColor: Colors.primaryGreen,
@@ -523,6 +690,73 @@ const styles = StyleSheet.create({
   // Submit
   submitButton: {
     marginTop: Spacing.xl,
+  },
+
+  // Condition card picker (replaces free-text input)
+  pickerHint: {
+    fontFamily: FontFamily.regular,
+    fontSize: FontSize.caption,
+    color: Colors.secondaryText,
+    marginBottom: Spacing.sm,
+  },
+  conditionCard: {
+    marginBottom: Spacing.sm,
+    borderRadius: BorderRadius.lg,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  conditionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.surface,
+    padding: Spacing.md,
+    gap: Spacing.sm,
+  },
+  conditionRowSelected: {
+    backgroundColor: Colors.lightGreenBg,
+    borderColor: Colors.primaryGreen,
+  },
+  conditionIcon: {
+    fontSize: 22,
+    width: 32,
+    textAlign: 'center',
+  },
+  conditionTextBlock: {
+    flex: 1,
+  },
+  conditionName: {
+    fontFamily: FontFamily.semiBold,
+    fontSize: FontSize.body,
+    color: Colors.darkText,
+    marginBottom: 2,
+  },
+  conditionNameSelected: {
+    color: Colors.primaryGreen,
+  },
+  conditionDesc: {
+    fontFamily: FontFamily.regular,
+    fontSize: FontSize.caption,
+    color: Colors.secondaryText,
+  },
+  conditionCheckbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 2,
+    borderColor: Colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.background,
+  },
+  conditionCheckboxSelected: {
+    backgroundColor: Colors.primaryGreen,
+    borderColor: Colors.primaryGreen,
+  },
+  conditionCheckmark: {
+    color: Colors.white,
+    fontSize: 13,
+    fontFamily: FontFamily.bold,
   },
 });
 

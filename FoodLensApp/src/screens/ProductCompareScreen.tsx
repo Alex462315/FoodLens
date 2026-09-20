@@ -25,6 +25,7 @@ import {Colors} from '../theme/colors';
 import {FontFamily, FontSize} from '../theme/typography';
 import {Spacing, BorderRadius, Shadow} from '../theme/spacing';
 import apiClient from '../services/apiClient';
+import {lookupProductByBarcode} from '../services/productService';
 
 interface ScanRecord {
   id: number;
@@ -107,9 +108,31 @@ const ProductCompareScreen: React.FC = () => {
     }
   };
 
-  const selectProduct = (scan: ScanRecord) => {
-    if (selecting === 1) setProduct1(scan);
-    else if (selecting === 2) setProduct2(scan);
+  /**
+   * Enrich a scan record with live nutrition from Open Food Facts
+   * if the stored nutrition_data is empty and a barcode is available.
+   */
+  const enrichWithNutrition = async (scan: ScanRecord): Promise<ScanRecord> => {
+    const hasNutrition = scan.nutrition_data && Object.keys(scan.nutrition_data).length > 0;
+    if (hasNutrition || !scan.barcode) return scan; // already has data or OCR scan
+    try {
+      const product = await lookupProductByBarcode(scan.barcode);
+      if (product.found && product.nutrition) {
+        return {
+          ...scan,
+          nutrition_data: product.nutrition as unknown as Record<string, number>,
+        };
+      }
+    } catch {
+      // silently ignore — just show 0.0
+    }
+    return scan;
+  };
+
+  const selectProduct = async (scan: ScanRecord) => {
+    const enriched = await enrichWithNutrition(scan);
+    if (selecting === 1) setProduct1(enriched);
+    else if (selecting === 2) setProduct2(enriched);
     setSelecting(null);
   };
 
@@ -359,6 +382,20 @@ const ProductCompareScreen: React.FC = () => {
                 val1={product1.nutrition_data?.carbohydrates}
                 val2={product2.nutrition_data?.carbohydrates}
               />
+
+              {/* Note for OCR scans / missing nutrition */}
+              {(!product1.barcode || !product2.barcode) && (
+                <Text style={cmpStyles.nutritionNote}>
+                  📷 OCR scans don't have nutrition data — only barcode products do.
+                </Text>
+              )}
+              {product1.barcode && product2.barcode &&
+                !product1.nutrition_data?.energy_kcal &&
+                !product2.nutrition_data?.energy_kcal && (
+                <Text style={cmpStyles.nutritionNote}>
+                  ℹ️ No nutrition data found for these products on Open Food Facts.
+                </Text>
+              )}
             </View>
           )}
 
@@ -619,6 +656,14 @@ const cmpStyles = StyleSheet.create({
     fontSize: FontSize.body,
     color: Colors.secondaryText,
     textAlign: 'center',
+  },
+  nutritionNote: {
+    fontFamily: FontFamily.regular,
+    fontSize: FontSize.small,
+    color: Colors.secondaryText,
+    textAlign: 'center',
+    marginTop: Spacing.sm,
+    fontStyle: 'italic',
   },
 });
 

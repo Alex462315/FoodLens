@@ -39,46 +39,198 @@ import {
   ComputeScoreResponse,
   scoreProduct,
 } from '../services/scoringService';
+import {
+  generateExplanation,
+  submitFeedback,
+  ExplanationResponse,
+} from '../services/explanationService';
+
+// Shape of an OCR-sourced result passed from OCRReviewScreen
+export interface OCRSourceResult extends ComputeScoreResponse {
+  product_name: string;   // user's optional label or 'Scanned Product (OCR)'
+  product_image_url: '';  // always empty for OCR
+  barcode: '';            // always empty for OCR
+  ocr_source: true;
+}
 
 const ProductResultScreen = ({navigation, route}: any) => {
-  const {barcode, initialResult} = route.params as {
+  const {barcode, initialResult, ocrResult} = route.params as {
     barcode: string;
     initialResult?: ProductLookupResult;
+    ocrResult?: OCRSourceResult;  // set by OCRReviewScreen instead of barcode
   };
+
+  // ── OCR path: score is pre-computed, skip lookup entirely ─────────────────
+  const isOcrSource = !!ocrResult;
 
   // Product state
   const [result, setResult] = useState<ProductLookupResult | null>(
     initialResult || null,
   );
-  const [loading, setLoading] = useState(!initialResult);
+  const [loading, setLoading] = useState(!initialResult && !isOcrSource);
   const [error, setError] = useState<string | null>(null);
 
-  // Scoring state
+  // Scoring state — pre-populated from OCR pipeline if ocrResult is given
   const [profiles, setProfiles] = useState<HealthProfile[]>([]);
   const [selectedProfileId, setSelectedProfileId] = useState<number | null>(null);
-  const [scoreResult, setScoreResult] = useState<ComputeScoreResponse | null>(null);
+  const [scoreResult, setScoreResult] = useState<ComputeScoreResponse | null>(
+    ocrResult ?? null,
+  );
   const [scoringLoading, setScoringLoading] = useState(false);
   const [scoringError, setScoringError] = useState<string | null>(null);
 
+  // AI Explanation state — inline on this screen
+  const [explanation, setExplanation] = useState<ExplanationResponse | null>(null);
+  const [explanationLoading, setExplanationLoading] = useState(false);
+  const [explanationError, setExplanationError] = useState<string | null>(null);
+  const [feedbackState, setFeedbackState] = useState<'none' | 'helpful' | 'not_helpful'>('none');
+  const [feedbackLoading, setFeedbackLoading] = useState(false);
 
-  // Fetch product on mount
+
+  // Fetch product on mount (barcode path only)
   useEffect(() => {
-    if (!initialResult && barcode) {
+    if (!initialResult && !isOcrSource && barcode) {
       fetchProduct();
     }
-  }, [barcode, initialResult]);
+  }, [barcode, initialResult, isOcrSource]);
 
   // Fetch profiles on mount
   useEffect(() => {
     fetchProfiles();
   }, []);
 
-  // Auto-score when product + profile are both ready
+  // Auto-score when product + profile are both ready (barcode path only)
+  // Auto-fetch AI explanation when score is available
   useEffect(() => {
-    if (result?.found && result.ingredients_text && selectedProfileId) {
+    const resultId = scoreResult?.scored_result_id;
+    if (resultId && !explanation && !explanationLoading) {
+      fetchExplanation(resultId);
+    }
+  }, [scoreResult?.scored_result_id]);
+
+  const fetchExplanation = async (scoredResultId: number) => {
+    setExplanationLoading(true);
+    setExplanationError(null);
+    try {
+      const data = await generateExplanation(scoredResultId);
+      setExplanation(data);
+    } catch (err: any) {
+      const message =
+        err?.response?.data?.detail ||
+        "Couldn't generate explanation right now.";
+      setExplanationError(message);
+    } finally {
+      setExplanationLoading(false);
+    }
+  };
+
+  const handleFeedback = async (isHelpful: boolean) => {
+    if (!explanation) return;
+    const newState = isHelpful ? 'helpful' : 'not_helpful';
+    if (
+      (feedbackState === 'helpful' && isHelpful) ||
+      (feedbackState === 'not_helpful' && !isHelpful)
+    ) return;
+
+    setFeedbackLoading(true);
+    try {
+      await submitFeedback(explanation.id, isHelpful);
+      setFeedbackState(newState);
+    } catch (err) {
+      console.warn('Feedback submission failed:', err);
+    } finally {
+      setFeedbackLoading(false);
+    }
+  };
+
+  // Render inline AI explanation card
+  const renderAIExplanation = () => {
+    if (!scoreResult?.scored_result_id) return null;
+
+    return (
+      <View style={styles.aiCard}>
+        <View style={styles.aiCardHeader}>
+          <Text style={styles.aiCardIcon}>🤖</Text>
+          <View style={{flex: 1}}>
+            <Text style={styles.aiCardTitle}>AI Explanation</Text>
+            <Text style={styles.aiCardSubtitle}>
+              Why this score based on your health profile
+            </Text>
+          </View>
+        </View>
+
+        {explanationLoading ? (
+          <View style={styles.aiLoadingContainer}>
+            <ActivityIndicator size="small" color={Colors.primaryGreen} />
+            <Text style={styles.aiLoadingText}>
+              Generating personalized explanation...
+            </Text>
+          </View>
+        ) : explanationError ? (
+          <View style={styles.aiErrorContainer}>
+            <Text style={styles.aiErrorText}>{explanationError}</Text>
+            <TouchableOpacity
+              onPress={() => fetchExplanation(scoreResult.scored_result_id)}
+              style={styles.aiRetryButton}>
+              <Text style={styles.aiRetryText}>Tap to retry</Text>
+            </TouchableOpacity>
+          </View>
+        ) : explanation ? (
+          <>
+            <View style={styles.aiChatBubble}>
+              <Text style={styles.aiExplanationText}>
+                {explanation.explanation_text}
+              </Text>
+              <Text style={styles.aiModelTag}>
+                Powered by {explanation.llm_model_used}
+              </Text>
+            </View>
+
+            {/* Inline feedback */}
+            <View style={styles.aiFeedbackRow}>
+              <Text style={styles.aiFeedbackLabel}>Helpful?</Text>
+              <View style={styles.aiFeedbackButtons}>
+                <TouchableOpacity
+                  style={[
+                    styles.aiFeedbackBtn,
+                    feedbackState === 'helpful' && styles.aiFeedbackBtnActive,
+                  ]}
+                  onPress={() => handleFeedback(true)}
+                  disabled={feedbackLoading}>
+                  <Text style={styles.aiFeedbackBtnIcon}>👍</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.aiFeedbackBtn,
+                    feedbackState === 'not_helpful' && styles.aiFeedbackBtnActiveNeg,
+                  ]}
+                  onPress={() => handleFeedback(false)}
+                  disabled={feedbackLoading}>
+                  <Text style={styles.aiFeedbackBtnIcon}>👎</Text>
+                </TouchableOpacity>
+              </View>
+              {feedbackState !== 'none' && (
+                <Text style={styles.aiFeedbackConfirm}>
+                  {feedbackState === 'helpful' ? '✅ Thanks!' : '📝 Noted!'}
+                </Text>
+              )}
+            </View>
+
+            {/* Disclaimer */}
+            <Text style={styles.aiDisclaimer}>
+              ℹ️ Based on pre-computed scoring data. The AI does not make independent health claims.
+            </Text>
+          </>
+        ) : null}
+      </View>
+    );
+  };
+
+  useEffect(() => {
+    if (!isOcrSource && result?.found && result.ingredients_text && selectedProfileId) {
       computeProductScore(result.ingredients_text, selectedProfileId);
     }
-  }, [result, selectedProfileId]);
+  }, [result, selectedProfileId, isOcrSource]);
 
   const fetchProduct = async () => {
     setLoading(true);
@@ -119,6 +271,9 @@ const ProductResultScreen = ({navigation, route}: any) => {
         barcode: barcode,
         product_name: result?.name || '',
         product_image_url: result?.image_url || '',
+        nutrition: result?.nutrition
+          ? (result.nutrition as unknown as Record<string, number | null>)
+          : {},
       });
       setScoreResult(scoreData);
     } catch (err: any) {
@@ -140,7 +295,7 @@ const ProductResultScreen = ({navigation, route}: any) => {
     navigation.navigate('ScanScreen');
   };
 
-  // --- Loading State ---
+  // --- Loading State (barcode path only) ---
   if (loading) {
     return (
       <SafeAreaView style={styles.safeArea}>
@@ -179,6 +334,97 @@ const ProductResultScreen = ({navigation, route}: any) => {
     );
   }
 
+  // ── OCR source: bypass barcode lookup, show score directly ──────────────
+  // MUST be checked BEFORE the !result / !result.found guard below
+  if (isOcrSource && ocrResult) {
+    const ocrScore = Math.round(parseFloat(ocrResult.normalized_score));
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <StatusBar barStyle="dark-content" backgroundColor={Colors.background} />
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}>
+
+          {/* OCR header — no product image, just the label */}
+          <View style={styles.ocrHeaderCard}>
+            <Text style={styles.ocrBadge}>📷 Ingredient Label Scan</Text>
+            <Text style={styles.productName}>
+              {ocrResult.product_name || 'Scanned Product (OCR)'}
+            </Text>
+            <Text style={styles.ocrNoteText}>
+              Product identity not verified — this name is your personal note only.
+            </Text>
+          </View>
+
+          {/* Score — already computed by OCRReviewScreen */}
+          <View style={styles.scoreCard}>
+            <Text style={styles.scoreCardTitle}>Health Risk Score</Text>
+
+            <View style={styles.gaugeContainer}>
+              <HealthRiskScoreGauge
+                score={ocrScore}
+                size={160}
+                strokeWidth={14}
+                showLabel={true}
+                overrideRiskLevel={
+                  ocrResult.has_allergen_warning
+                    ? 'high'
+                    : undefined
+                }
+              />
+            </View>
+
+            <View style={styles.riskBadgeRow}>
+              <RiskBadge
+                level={
+                  ocrResult.has_allergen_warning
+                    ? 'high'
+                    : (ocrResult.risk_label?.toLowerCase() as any) || 'low'
+                }
+              />
+            </View>
+
+            {/* Allergen warning */}
+            {ocrResult.has_allergen_warning && (
+              <View style={styles.allergenBanner}>
+                <Text style={styles.allergenBannerIcon}>⚠️</Text>
+                <Text style={styles.allergenBannerText}>
+                  One or more ingredients may trigger your allergies.
+                </Text>
+              </View>
+            )}
+          </View>
+
+          {/* AI Explanation — inline */}
+          {renderAIExplanation()}
+
+          {/* Ingredient breakdown */}
+          {ocrResult.ingredient_breakdown?.length > 0 && (
+            <View style={styles.ingredientCard}>
+              <Text style={styles.ingredientCardTitle}>🔍 Ingredient Breakdown</Text>
+              {ocrResult.ingredient_breakdown
+                .filter(i => i.matched_name !== null)
+                .map((item, idx) => (
+                  <View key={idx} style={styles.ingredientRow}>
+                    <Text style={styles.ingredientName}>{item.matched_name}</Text>
+                    <Text style={styles.ingredientImpact}>
+                      {parseFloat(item.ingredient_impact ?? '0').toFixed(1)}
+                    </Text>
+                  </View>
+                ))}
+            </View>
+          )}
+
+          <TouchableOpacity
+            style={styles.secondaryLink}
+            onPress={() => navigation.navigate('ScanScreen')}>
+            <Text style={styles.secondaryLinkText}>Scan Another Product</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
+
   // --- Not Found State ---
   if (!result || !result.found) {
     return (
@@ -211,7 +457,7 @@ const ProductResultScreen = ({navigation, route}: any) => {
     );
   }
 
-  // --- Found State ---
+  // --- Found State (barcode path) ---
   const normalizedScore = scoreResult
     ? Math.round(parseFloat(scoreResult.normalized_score))
     : null;
@@ -544,30 +790,8 @@ const ProductResultScreen = ({navigation, route}: any) => {
           </View>
         )}
 
-        {/* AI Explanation Button */}
-        {scoreResult && scoreResult.scored_result_id && (
-          <TouchableOpacity
-            style={styles.aiExplanationButton}
-            onPress={() =>
-              navigation.navigate('AIExplanationScreen', {
-                scoredResultId: scoreResult.scored_result_id,
-                productName: result?.name || 'this product',
-                riskLabel: scoreResult.risk_label,
-              })
-            }
-            activeOpacity={0.7}>
-            <Text style={styles.aiExplanationIcon}>🤖</Text>
-            <View style={styles.aiExplanationTextContainer}>
-              <Text style={styles.aiExplanationTitle}>
-                View AI Explanation
-              </Text>
-              <Text style={styles.aiExplanationSubtitle}>
-                Get a plain-language summary of this score
-              </Text>
-            </View>
-            <Text style={styles.aiExplanationArrow}>›</Text>
-          </TouchableOpacity>
-        )}
+        {/* AI Explanation — inline */}
+        {scoreResult && renderAIExplanation()}
 
         {/* Share Button */}
         {scoreResult && result && (
@@ -577,7 +801,7 @@ const ProductResultScreen = ({navigation, route}: any) => {
               const riskEmoji =
                 scoreResult.risk_label === 'High' ? '🔴'
                 : scoreResult.risk_label === 'Moderate' ? '🟡' : '🟢';
-              const score = Math.round(scoreResult.normalized_score);
+              const score = Math.round(parseFloat(String(scoreResult.normalized_score)));
               const allergenNote = scoreResult.has_allergen_warning
                 ? '\n🚨 Allergen Warning: ' + scoreResult.allergen_details.join(', ')
                 : '';
@@ -993,40 +1217,133 @@ const styles = StyleSheet.create({
     width: '100%',
   },
 
-  // AI Explanation Button
-  aiExplanationButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  // AI Explanation Inline Card
+  aiCard: {
     backgroundColor: Colors.surface,
-    borderRadius: BorderRadius.lg,
-    padding: Spacing.md,
+    borderRadius: BorderRadius.xl,
+    padding: Spacing.lg,
     marginTop: Spacing.md,
-    ...Shadow.sm,
+    marginBottom: Spacing.sm,
     borderLeftWidth: 4,
     borderLeftColor: Colors.primaryGreen,
+    ...Shadow.sm,
   },
-  aiExplanationIcon: {
+  aiCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: Spacing.md,
+    gap: Spacing.sm,
+  },
+  aiCardIcon: {
     fontSize: 28,
-    marginRight: Spacing.sm,
   },
-  aiExplanationTextContainer: {
-    flex: 1,
-  },
-  aiExplanationTitle: {
+  aiCardTitle: {
     fontFamily: FontFamily.semiBold,
     fontSize: FontSize.body,
     color: Colors.primaryGreen,
   },
-  aiExplanationSubtitle: {
+  aiCardSubtitle: {
     fontFamily: FontFamily.regular,
     fontSize: FontSize.small,
     color: Colors.secondaryText,
-    marginTop: 2,
+    marginTop: 1,
   },
-  aiExplanationArrow: {
-    fontSize: 28,
+  aiLoadingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: Spacing.md,
+    gap: Spacing.sm,
+  },
+  aiLoadingText: {
+    fontFamily: FontFamily.regular,
+    fontSize: FontSize.caption,
+    color: Colors.secondaryText,
+    flex: 1,
+  },
+  aiErrorContainer: {
+    paddingVertical: Spacing.sm,
+  },
+  aiErrorText: {
+    fontFamily: FontFamily.regular,
+    fontSize: FontSize.caption,
+    color: Colors.redDark,
+    marginBottom: Spacing.xs,
+  },
+  aiRetryButton: {
+    paddingVertical: Spacing.xs,
+  },
+  aiRetryText: {
+    fontFamily: FontFamily.medium,
+    fontSize: FontSize.caption,
     color: Colors.primaryGreen,
-    fontWeight: 'bold',
+  },
+  aiChatBubble: {
+    backgroundColor: Colors.background,
+    borderRadius: BorderRadius.lg,
+    padding: Spacing.md,
+    marginBottom: Spacing.sm,
+  },
+  aiExplanationText: {
+    fontFamily: FontFamily.regular,
+    fontSize: FontSize.body,
+    color: Colors.darkText,
+    lineHeight: 23,
+    letterSpacing: 0.15,
+  },
+  aiModelTag: {
+    fontFamily: FontFamily.regular,
+    fontSize: FontSize.small,
+    color: Colors.lightText,
+    marginTop: Spacing.sm,
+    fontStyle: 'italic',
+  },
+  aiFeedbackRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    marginTop: Spacing.xs,
+  },
+  aiFeedbackLabel: {
+    fontFamily: FontFamily.medium,
+    fontSize: FontSize.small,
+    color: Colors.secondaryText,
+  },
+  aiFeedbackButtons: {
+    flexDirection: 'row',
+    gap: Spacing.xs,
+  },
+  aiFeedbackBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1.5,
+    borderColor: Colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.surface,
+  },
+  aiFeedbackBtnActive: {
+    borderColor: Colors.primaryGreen,
+    backgroundColor: Colors.lightGreenBg,
+  },
+  aiFeedbackBtnActiveNeg: {
+    borderColor: Colors.amberDark,
+    backgroundColor: Colors.amberBg,
+  },
+  aiFeedbackBtnIcon: {
+    fontSize: 16,
+  },
+  aiFeedbackConfirm: {
+    fontFamily: FontFamily.regular,
+    fontSize: FontSize.small,
+    color: Colors.primaryGreen,
+  },
+  aiDisclaimer: {
+    fontFamily: FontFamily.regular,
+    fontSize: FontSize.small,
+    color: Colors.lightText,
+    marginTop: Spacing.sm,
+    lineHeight: 16,
   },
 
   secondaryLink: {
@@ -1169,6 +1486,68 @@ const styles = StyleSheet.create({
     fontFamily: FontFamily.bold,
     fontSize: 24,
     color: Colors.lightText,
+  },
+
+  // ── OCR Result specific ─────────────────────────────────────────────────────
+  ocrHeaderCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.xl,
+    padding: Spacing.base,
+    marginBottom: Spacing.base,
+    borderLeftWidth: 4,
+    borderLeftColor: Colors.primaryGreen,
+    ...Shadow.sm,
+  },
+  ocrBadge: {
+    fontFamily: FontFamily.semiBold,
+    fontSize: FontSize.caption,
+    color: Colors.primaryGreen,
+    marginBottom: Spacing.xs,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  ocrNoteText: {
+    fontFamily: FontFamily.regular,
+    fontSize: FontSize.small,
+    color: Colors.secondaryText,
+    fontStyle: 'italic',
+    marginTop: Spacing.xs,
+  },
+  riskBadgeRow: {
+    alignItems: 'center',
+    marginBottom: Spacing.base,
+  },
+  ingredientCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.xl,
+    padding: Spacing.base,
+    marginBottom: Spacing.base,
+    ...Shadow.sm,
+  },
+  ingredientCardTitle: {
+    fontFamily: FontFamily.bold,
+    fontSize: FontSize.h2,
+    color: Colors.darkText,
+    marginBottom: Spacing.sm,
+  },
+  ingredientRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: Spacing.xs,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.divider,
+  },
+  ingredientName: {
+    fontFamily: FontFamily.regular,
+    fontSize: FontSize.body,
+    color: Colors.darkText,
+    flex: 1,
+  },
+  ingredientImpact: {
+    fontFamily: FontFamily.bold,
+    fontSize: FontSize.body,
+    color: Colors.primaryGreen,
   },
 });
 

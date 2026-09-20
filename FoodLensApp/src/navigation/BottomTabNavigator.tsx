@@ -7,10 +7,10 @@ import React from 'react';
 import {View, Text, StyleSheet, TouchableOpacity} from 'react-native';
 import {createBottomTabNavigator} from '@react-navigation/bottom-tabs';
 import HomeScreen from '../screens/HomeScreen';
-import HistoryScreen from '../screens/HistoryScreen';
+import HistoryNavigator from './HistoryNavigator';
 import ScanNavigator from './ScanNavigator';
 import ProfileNavigator from './ProfileNavigator';
-import MoreScreen from '../screens/MoreScreen';
+import MoreNavigator from './MoreNavigator';
 import {Colors} from '../theme/colors';
 import {FontFamily, FontSize} from '../theme/typography';
 import {Shadow} from '../theme/spacing';
@@ -84,7 +84,7 @@ const BottomTabNavigator: React.FC = () => {
       />
       <Tab.Screen
         name="History"
-        component={HistoryScreen}
+        component={HistoryNavigator}
         options={{
           tabBarIcon: ({focused}) => (
             <TabIcon name="History" focused={focused} />
@@ -113,7 +113,7 @@ const BottomTabNavigator: React.FC = () => {
       />
       <Tab.Screen
         name="More"
-        component={MoreScreen}
+        component={MoreNavigator}
         options={{
           tabBarIcon: ({focused}) => <TabIcon name="More" focused={focused} />,
         }}

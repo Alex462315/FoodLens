@@ -22,11 +22,12 @@ import {
   StatusBar,
 } from 'react-native';
 import {useFocusEffect} from '@react-navigation/native';
+import {useNavigation} from '@react-navigation/native';
 import {Colors} from '../theme/colors';
 import {FontFamily, FontSize} from '../theme/typography';
 import {Spacing, BorderRadius, Shadow} from '../theme/spacing';
 import {RiskBadge} from '../components';
-import {getScanHistory, ScanHistoryItem} from '../services/scoringService';
+import {getScanHistory, getScanDetail, ScanHistoryItem} from '../services/scoringService';
 
 /**
  * Format ISO date to a human-friendly relative string.
@@ -52,6 +53,7 @@ const formatRelativeDate = (isoDate: string): string => {
 };
 
 const HistoryScreen: React.FC = () => {
+  const navigation = useNavigation<any>();
   const [scans, setScans] = useState<ScanHistoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -84,8 +86,18 @@ const HistoryScreen: React.FC = () => {
     fetchHistory(true);
   };
 
+  const handleItemPress = async (item: ScanHistoryItem) => {
+    try {
+      const detail = await getScanDetail(item.id);
+      navigation.navigate('HistoryDetail', {scanDetail: detail});
+    } catch {
+      // fallback: navigate with basic info
+      navigation.navigate('HistoryDetail', {scanDetail: item});
+    }
+  };
+
   const renderScanItem = ({item}: {item: ScanHistoryItem}) => {
-    const score = parseFloat(item.normalized_score);
+    const score = parseFloat(String(item.normalized_score));
     const riskColors =
       item.risk_label === 'High'
         ? Colors.riskHigh
@@ -94,7 +106,10 @@ const HistoryScreen: React.FC = () => {
         : Colors.riskLow;
 
     return (
-      <View style={styles.scanCard}>
+      <TouchableOpacity
+        style={styles.scanCard}
+        onPress={() => handleItemPress(item)}
+        activeOpacity={0.75}>
         {/* Product Image */}
         <View style={styles.thumbnailContainer}>
           {item.product_image_url ? (
@@ -140,7 +155,8 @@ const HistoryScreen: React.FC = () => {
           </View>
           <RiskBadge level={item.risk_label.toLowerCase() as any} />
         </View>
-      </View>
+        <Text style={styles.chevron}>›</Text>
+      </TouchableOpacity>
     );
   };
 
@@ -343,6 +359,13 @@ const styles = StyleSheet.create({
     fontSize: FontSize.caption,
     color: Colors.white,
   },
+  chevron: {
+    fontFamily: FontFamily.bold,
+    fontSize: 22,
+    color: Colors.lightText,
+    marginLeft: Spacing.sm,
+  },
 });
+
 
 export default HistoryScreen;

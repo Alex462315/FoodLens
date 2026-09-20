@@ -13,6 +13,8 @@ import NutritionSummaryScreen from '../screens/NutritionSummaryScreen';
 import ProductCompareScreen from '../screens/ProductCompareScreen';
 import CommunitySubmitScreen from '../screens/CommunitySubmitScreen';
 import AnalyticsScreen from '../screens/AnalyticsScreen';
+import AdminUsersScreen from '../screens/AdminUsersScreen';
+import HistoryDetailScreen from '../screens/HistoryDetailScreen';
 import {useAuth} from '../context/AuthContext';
 import {Colors} from '../theme/colors';
 
@@ -56,8 +58,28 @@ const MainNavigator: React.FC = () => (
       component={AnalyticsScreen}
       options={{
         headerShown: true,
-        title: 'My Scan Analytics',
+        title: 'Admin Analytics',
         headerBackTitle: 'Back',
+        headerTintColor: Colors.primaryGreen,
+      }}
+    />
+    <Stack.Screen
+      name="AdminUsers"
+      component={AdminUsersScreen}
+      options={{
+        headerShown: true,
+        title: 'User Management',
+        headerBackTitle: 'Back',
+        headerTintColor: Colors.primaryGreen,
+      }}
+    />
+    <Stack.Screen
+      name="HistoryDetail"
+      component={HistoryDetailScreen}
+      options={{
+        headerShown: true,
+        title: 'Scan Detail',
+        headerBackTitle: 'History',
         headerTintColor: Colors.primaryGreen,
       }}
     />
