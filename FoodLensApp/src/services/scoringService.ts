@@ -75,6 +75,7 @@ export interface ProductMeta {
   barcode?: string;
   product_name?: string;
   product_image_url?: string;
+  nutrition?: Record<string, number | null>;
 }
 
 /**
@@ -93,6 +94,7 @@ export const computeScore = async (
       barcode: productMeta?.barcode || '',
       product_name: productMeta?.product_name || '',
       product_image_url: productMeta?.product_image_url || '',
+      nutrition: productMeta?.nutrition || {},
     },
   );
   return response.data;
@@ -143,6 +145,14 @@ export interface ScanHistoryItem {
   risk_label: 'Low' | 'Moderate' | 'High';
   has_allergen_warning: boolean;
   allergen_details: string[];
+  nutrition_data?: Record<string, number>;
+  ingredient_breakdown?: Array<{
+    original_name: string;
+    matched_name: string | null;
+    category: string | null;
+    position: number;
+    adjusted_risk_score: number;
+  }>;
   created_at: string;
 }
 
@@ -151,5 +161,13 @@ export interface ScanHistoryItem {
  */
 export const getScanHistory = async (): Promise<ScanHistoryItem[]> => {
   const response = await apiClient.get<ScanHistoryItem[]>('/scoring/history/');
+  return response.data;
+};
+
+/**
+ * Fetch full detail for a single scan (nutrition + ingredient breakdown).
+ */
+export const getScanDetail = async (id: number): Promise<ScanHistoryItem> => {
+  const response = await apiClient.get<ScanHistoryItem>(`/scoring/history/${id}/`);
   return response.data;
 };

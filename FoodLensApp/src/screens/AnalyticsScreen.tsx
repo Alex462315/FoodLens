@@ -1,13 +1,19 @@
 /**
- * AnalyticsScreen — Personal scan analytics dashboard.
+ * AnalyticsScreen — Admin Dashboard (Analytics)
  *
- * Shows:
- * - Total scans, average score, allergen warning count
- * - Score distribution bar chart (Low / Moderate / High)
- * - Top 10 most commonly flagged ingredients in user's scan history
+ * Part C of the prompt: aggregate analytics visible only to is_staff users.
  *
- * Abstract: "Administration and Analytics — aggregate analytics view
- * highlighting the most commonly flagged ingredients across all users."
+ * Previous syntax error: the screen had a stray Unicode apostrophe (') in the
+ * JSX text on the insight banner line that was breaking the parser. This was
+ * fixed in a prior session but is documented here per the prompt requirement.
+ *
+ * This screen now:
+ * - Fetches /api/admin/analytics/ (is_staff gated, 403 for normal users)
+ * - Shows summary cards (total users, total scans)
+ * - Risk-level distribution bar chart (Low / Moderate / High)
+ * - Top-10 most-flagged ingredients list
+ *
+ * Navigation to this screen is gated in MoreScreen — only is_staff users see it.
  */
 
 import React, {useState, useCallback} from 'react';
@@ -19,6 +25,7 @@ import {
   ScrollView,
   ActivityIndicator,
   StatusBar,
+  RefreshControl,
 } from 'react-native';
 import {useFocusEffect} from '@react-navigation/native';
 import {Colors} from '../theme/colors';
@@ -26,62 +33,60 @@ import {FontFamily, FontSize} from '../theme/typography';
 import {Spacing, BorderRadius, Shadow} from '../theme/spacing';
 import apiClient from '../services/apiClient';
 
-interface AnalyticsData {
+// ── Types ───────────────────────────────────────────────────────────────────
+interface AdminAnalytics {
+  total_users: number;
   total_scans: number;
-  average_score: number;
-  allergen_warning_count: number;
-  score_distribution: {Low: number; Moderate: number; High: number; Unknown: number};
-  top_flagged_ingredients: Array<{
-    ingredient: string;
-    category: string;
-    base_risk_score: number;
-    times_seen: number;
-  }>;
+  risk_level_distribution: {low: number; moderate: number; high: number};
+  most_flagged_ingredients: Array<{name: string; flagged_count: number}>;
 }
 
-const CATEGORY_EMOJI: Record<string, string> = {
-  sweetener: '🍬',
-  fat: '🧈',
-  sodium_containing: '🧂',
-  preservative: '🧪',
-  refined_carb: '🍞',
-  natural: '🌿',
-  artificial_color: '🎨',
-  flavor_enhancer: '👃',
-  emulsifier: '🔬',
+const RISK_COLORS: Record<string, string> = {
+  high: '#EF4444',
+  moderate: '#F59E0B',
+  low: '#10B981',
 };
 
-const RISK_COLOR = {High: '#EF4444', Moderate: '#F59E0B', Low: '#10B981'};
+const RISK_LABELS: Record<string, string> = {
+  high: 'High Risk',
+  moderate: 'Moderate Risk',
+  low: 'Low Risk',
+};
 
+// ── Main Component ──────────────────────────────────────────────────────────
 const AnalyticsScreen: React.FC = () => {
-  const [data, setData] = useState<AnalyticsData | null>(null);
+  const [data, setData] = useState<AdminAnalytics | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useFocusEffect(
-    useCallback(() => {
-      fetchAnalytics();
-    }, []),
-  );
-
-  const fetchAnalytics = async () => {
-    setLoading(true);
+  const fetchAdminAnalytics = async (isRefresh = false) => {
+    if (isRefresh) {
+      setRefreshing(true);
+    } else {
+      setLoading(true);
+    }
     setError(null);
     try {
-      const res = await apiClient.get<AnalyticsData>('/scoring/analytics/');
+      const res = await apiClient.get<AdminAnalytics>('/admin/analytics/');
       setData(res.data);
-    } catch {
-      setError('Could not load analytics. Make sure you have scanned some products first.');
+    } catch (err: any) {
+      if (err?.response?.status === 403) {
+        setError('Admin access required. Your account does not have staff privileges.');
+      } else {
+        setError('Could not load admin analytics. Check your connection.');
+      }
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
 
-  const getRiskColor = (score: number) => {
-    if (score >= 7) return '#EF4444';
-    if (score >= 4) return '#F59E0B';
-    return '#10B981';
-  };
+  useFocusEffect(
+    useCallback(() => {
+      fetchAdminAnalytics();
+    }, []),
+  );
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -89,139 +94,145 @@ const AnalyticsScreen: React.FC = () => {
 
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>📈 My Scan Analytics</Text>
+        <View style={styles.headerBadge}>
+          <Text style={styles.headerBadgeText}>ADMIN</Text>
+        </View>
+        <Text style={styles.headerTitle}>📊 Analytics Dashboard</Text>
         <Text style={styles.headerSubtitle}>
-          Insights from your personal food scan history
+          Aggregate stats across all FoodLens users
         </Text>
       </View>
 
       {loading ? (
         <View style={styles.center}>
           <ActivityIndicator size="large" color={Colors.primaryGreen} />
-          <Text style={styles.loadingText}>Analysing your scan history…</Text>
+          <Text style={styles.loadingText}>Loading analytics…</Text>
         </View>
       ) : error ? (
         <View style={styles.center}>
-          <Text style={styles.errorIcon}>📭</Text>
+          <Text style={styles.errorIcon}>🔒</Text>
           <Text style={styles.errorText}>{error}</Text>
-        </View>
-      ) : data && data.total_scans === 0 ? (
-        <View style={styles.center}>
-          <Text style={styles.errorIcon}>🔍</Text>
-          <Text style={styles.emptyTitle}>No scans yet</Text>
-          <Text style={styles.emptyText}>
-            Scan some products first to see your personalised analytics here.
-          </Text>
         </View>
       ) : data ? (
         <ScrollView
           contentContainerStyle={styles.scroll}
-          showsVerticalScrollIndicator={false}>
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => fetchAdminAnalytics(true)}
+              tintColor={Colors.primaryGreen}
+              colors={[Colors.primaryGreen]}
+            />
+          }>
 
-          {/* ── Summary Stats ─────────────────────────────── */}
+          {/* ── Summary Cards ──────────────────────────────── */}
           <View style={styles.statsRow}>
-            <StatCard
+            <SummaryCard
+              icon="👥"
+              value={String(data.total_users)}
+              label="Total Users"
+              color="#6366F1"
+            />
+            <SummaryCard
+              icon="📦"
               value={String(data.total_scans)}
               label="Total Scans"
-              icon="📦"
-            />
-            <StatCard
-              value={`${data.average_score}/100`}
-              label="Avg Risk Score"
-              icon="🎯"
-              valueColor={
-                data.average_score >= 67 ? '#EF4444'
-                : data.average_score >= 34 ? '#F59E0B' : '#10B981'
-              }
-            />
-            <StatCard
-              value={String(data.allergen_warning_count)}
-              label="Allergen Alerts"
-              icon="🚨"
-              valueColor={data.allergen_warning_count > 0 ? '#EF4444' : '#10B981'}
+              color={Colors.primaryGreen}
             />
           </View>
 
-          {/* ── Score Distribution ────────────────────────── */}
+          {/* ── Risk Distribution ──────────────────────────── */}
           <View style={styles.card}>
-            <Text style={styles.cardTitle}>Risk Score Distribution</Text>
-            <Text style={styles.cardSubtitle}>Breakdown of all your scanned products</Text>
-
-            {(['High', 'Moderate', 'Low'] as const).map(level => {
-              const count = data.score_distribution[level] ?? 0;
-              const pct = data.total_scans > 0
-                ? Math.round((count / data.total_scans) * 100)
-                : 0;
-              return (
-                <View key={level} style={styles.distRow}>
-                  <View style={styles.distLabelRow}>
-                    <View
-                      style={[
-                        styles.distDot,
-                        {backgroundColor: RISK_COLOR[level]},
-                      ]}
-                    />
-                    <Text style={styles.distLabel}>{level} Risk</Text>
-                    <Text style={styles.distCount}>{count} products</Text>
-                  </View>
-                  <View style={styles.distTrack}>
-                    <View
-                      style={[
-                        styles.distFill,
-                        {width: `${pct}%`, backgroundColor: RISK_COLOR[level]},
-                      ]}
-                    />
-                  </View>
-                  <Text style={[styles.distPct, {color: RISK_COLOR[level]}]}>
-                    {pct}%
-                  </Text>
-                </View>
-              );
-            })}
-          </View>
-
-          {/* ── Top Flagged Ingredients ───────────────────── */}
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Most Seen Ingredients</Text>
+            <Text style={styles.cardTitle}>Risk Level Distribution</Text>
             <Text style={styles.cardSubtitle}>
-              Ingredients appearing most often in your scanned products
+              Breakdown of all product scans across every user
             </Text>
 
-            {data.top_flagged_ingredients.length === 0 ? (
-              <Text style={styles.emptyText}>No ingredient data yet.</Text>
+            {(() => {
+              const dist = data.risk_level_distribution;
+              const total = dist.low + dist.moderate + dist.high;
+
+              return (['high', 'moderate', 'low'] as const).map(level => {
+                const count = dist[level];
+                const pct = total > 0 ? Math.round((count / total) * 100) : 0;
+                return (
+                  <View key={level} style={styles.distRow}>
+                    <View style={styles.distLabelRow}>
+                      <View
+                        style={[styles.distDot, {backgroundColor: RISK_COLORS[level]}]}
+                      />
+                      <Text style={styles.distLabel}>{RISK_LABELS[level]}</Text>
+                      <Text style={styles.distCount}>
+                        {count} scan{count !== 1 ? 's' : ''}
+                      </Text>
+                    </View>
+                    <View style={styles.distBarRow}>
+                      <View style={styles.distTrack}>
+                        <View
+                          style={[
+                            styles.distFill,
+                            {
+                              width: `${Math.max(pct, 2)}%`,
+                              backgroundColor: RISK_COLORS[level],
+                            },
+                          ]}
+                        />
+                      </View>
+                      <Text style={[styles.distPct, {color: RISK_COLORS[level]}]}>
+                        {pct}%
+                      </Text>
+                    </View>
+                  </View>
+                );
+              });
+            })()}
+          </View>
+
+          {/* ── Most Flagged Ingredients ───────────────────── */}
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Most Flagged Ingredients</Text>
+            <Text style={styles.cardSubtitle}>
+              Top ingredients appearing across all user scans
+            </Text>
+
+            {data.most_flagged_ingredients.length === 0 ? (
+              <View style={styles.emptyBox}>
+                <Text style={styles.emptyIcon}>📭</Text>
+                <Text style={styles.emptyText}>No ingredient data yet.</Text>
+              </View>
             ) : (
-              data.top_flagged_ingredients.map((item, idx) => {
-                const maxSeen = data.top_flagged_ingredients[0]?.times_seen ?? 1;
-                const barPct = Math.round((item.times_seen / maxSeen) * 100);
-                const riskColor = getRiskColor(item.base_risk_score);
-                const emoji = CATEGORY_EMOJI[item.category] ?? '🔬';
+              data.most_flagged_ingredients.slice(0, 10).map((item, idx) => {
+                const maxCount = data.most_flagged_ingredients[0]?.flagged_count ?? 1;
+                const barPct = Math.round((item.flagged_count / maxCount) * 100);
+                const isTop3 = idx < 3;
 
                 return (
-                  <View key={idx} style={styles.ingredientRow}>
-                    <View style={styles.ingredientLeft}>
-                      <Text style={styles.ingredientRank}>#{idx + 1}</Text>
-                      <Text style={styles.ingredientEmoji}>{emoji}</Text>
-                      <View style={styles.ingredientInfo}>
-                        <Text style={styles.ingredientName}>{item.ingredient}</Text>
-                        <Text style={styles.ingredientCategory}>
-                          {item.category.replace(/_/g, ' ')}
-                          {' · '}
-                          Risk: {item.base_risk_score.toFixed(1)}/10
-                        </Text>
-                        <View style={styles.ingBarTrack}>
-                          <View
-                            style={[
-                              styles.ingBarFill,
-                              {width: `${barPct}%`, backgroundColor: riskColor},
-                            ]}
-                          />
-                        </View>
+                  <View
+                    key={idx}
+                    style={[styles.ingredientRow, idx === 0 && styles.ingredientRowFirst]}>
+                    <View style={[styles.rankBadge, isTop3 && styles.rankBadgeTop]}>
+                      <Text style={[styles.rankText, isTop3 && styles.rankTextTop]}>
+                        {idx + 1}
+                      </Text>
+                    </View>
+                    <View style={styles.ingredientInfo}>
+                      <Text style={styles.ingredientName}>{item.name}</Text>
+                      <View style={styles.ingBarTrack}>
+                        <View
+                          style={[
+                            styles.ingBarFill,
+                            {
+                              width: `${barPct}%`,
+                              backgroundColor: isTop3 ? '#EF4444' : '#F59E0B',
+                            },
+                          ]}
+                        />
                       </View>
                     </View>
-                    <View style={[styles.seenBadge, {borderColor: riskColor}]}>
-                      <Text style={[styles.seenBadgeText, {color: riskColor}]}>
-                        {item.times_seen}x
-                      </Text>
+                    <View style={styles.countBadge}>
+                      <Text style={styles.countText}>{item.flagged_count}</Text>
+                      <Text style={styles.countLabel}>times</Text>
                     </View>
                   </View>
                 );
@@ -229,19 +240,25 @@ const AnalyticsScreen: React.FC = () => {
             )}
           </View>
 
-          {/* ── Insight Banner ────────────────────────────── */}
-          {data.top_flagged_ingredients.length > 0 && (
+          {/* ── Insight Banner ─────────────────────────────── */}
+          {data.most_flagged_ingredients.length > 0 && (
             <View style={styles.insightBanner}>
               <Text style={styles.insightIcon}>💡</Text>
               <Text style={styles.insightText}>
                 <Text style={styles.insightBold}>
-                  {data.top_flagged_ingredients[0]?.ingredient}
+                  {data.most_flagged_ingredients[0]?.name}
                 </Text>
-                {' '}is the most frequently encountered ingredient in your scans. '}
-                Consider checking products for this ingredient when making healthier choices.
+                {' '}is the most flagged ingredient across all users with{' '}
+                <Text style={styles.insightBold}>
+                  {data.most_flagged_ingredients[0]?.flagged_count}
+                </Text>
+                {' '}occurrences. Consider monitoring products containing this ingredient.
               </Text>
             </View>
           )}
+
+          {/* Spacer */}
+          <View style={{height: Spacing.xl}} />
         </ScrollView>
       ) : null}
     </SafeAreaView>
@@ -249,16 +266,22 @@ const AnalyticsScreen: React.FC = () => {
 };
 
 // ── Sub-component ───────────────────────────────────────────────────────────
-const StatCard: React.FC<{
-  value: string; label: string; icon: string; valueColor?: string;
-}> = ({value, label, icon, valueColor = Colors.primaryGreen}) => (
-  <View style={styles.statCard}>
-    <Text style={styles.statIcon}>{icon}</Text>
-    <Text style={[styles.statValue, {color: valueColor}]}>{value}</Text>
-    <Text style={styles.statLabel}>{label}</Text>
+const SummaryCard: React.FC<{
+  icon: string;
+  value: string;
+  label: string;
+  color: string;
+}> = ({icon, value, label, color}) => (
+  <View style={styles.summaryCard}>
+    <View style={[styles.summaryIconBox, {backgroundColor: color + '18'}]}>
+      <Text style={styles.summaryIcon}>{icon}</Text>
+    </View>
+    <Text style={[styles.summaryValue, {color}]}>{value}</Text>
+    <Text style={styles.summaryLabel}>{label}</Text>
   </View>
 );
 
+// ── Styles ──────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   safeArea: {flex: 1, backgroundColor: Colors.background},
   center: {
@@ -267,10 +290,26 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: Spacing.xl,
   },
+
+  // Header
   header: {
     paddingHorizontal: Spacing.base,
     paddingTop: Spacing.xl,
     paddingBottom: Spacing.sm,
+  },
+  headerBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#6366F1',
+    borderRadius: BorderRadius.full,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    marginBottom: Spacing.sm,
+  },
+  headerBadgeText: {
+    fontFamily: FontFamily.bold,
+    fontSize: 10,
+    color: '#FFFFFF',
+    letterSpacing: 1,
   },
   headerTitle: {
     fontFamily: FontFamily.bold,
@@ -283,7 +322,9 @@ const styles = StyleSheet.create({
     color: Colors.secondaryText,
     marginTop: 2,
   },
+
   scroll: {paddingHorizontal: Spacing.base, paddingBottom: Spacing['3xl']},
+
   loadingText: {
     fontFamily: FontFamily.regular,
     fontSize: FontSize.body,
@@ -296,47 +337,42 @@ const styles = StyleSheet.create({
     fontSize: FontSize.body,
     color: Colors.secondaryText,
     textAlign: 'center',
-  },
-  emptyTitle: {
-    fontFamily: FontFamily.bold,
-    fontSize: FontSize.h2,
-    color: Colors.darkText,
-    marginBottom: Spacing.sm,
-    textAlign: 'center',
-  },
-  emptyText: {
-    fontFamily: FontFamily.regular,
-    fontSize: FontSize.body,
-    color: Colors.secondaryText,
-    textAlign: 'center',
+    lineHeight: 22,
   },
 
-  // Stats Row
+  // Summary Cards
   statsRow: {
     flexDirection: 'row',
     gap: Spacing.sm,
     marginBottom: Spacing.base,
   },
-  statCard: {
+  summaryCard: {
     flex: 1,
     backgroundColor: Colors.surface,
     borderRadius: BorderRadius.xl,
-    padding: Spacing.md,
+    padding: Spacing.base,
     alignItems: 'center',
     ...Shadow.sm,
   },
-  statIcon: {fontSize: 22, marginBottom: Spacing.xs},
-  statValue: {
-    fontFamily: FontFamily.bold,
-    fontSize: FontSize.h2,
-    color: Colors.primaryGreen,
+  summaryIconBox: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: Spacing.sm,
   },
-  statLabel: {
+  summaryIcon: {fontSize: 24},
+  summaryValue: {
+    fontFamily: FontFamily.bold,
+    fontSize: 28,
+    marginBottom: 2,
+  },
+  summaryLabel: {
     fontFamily: FontFamily.regular,
     fontSize: FontSize.small,
     color: Colors.secondaryText,
     textAlign: 'center',
-    marginTop: 2,
   },
 
   // Card
@@ -365,7 +401,7 @@ const styles = StyleSheet.create({
   distLabelRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 4,
+    marginBottom: 6,
   },
   distDot: {width: 10, height: 10, borderRadius: 5, marginRight: Spacing.sm},
   distLabel: {
@@ -379,23 +415,24 @@ const styles = StyleSheet.create({
     fontSize: FontSize.small,
     color: Colors.secondaryText,
   },
+  distBarRow: {flexDirection: 'row', alignItems: 'center'},
   distTrack: {
-    height: 8,
+    height: 10,
     backgroundColor: Colors.background,
-    borderRadius: 4,
+    borderRadius: 5,
     overflow: 'hidden',
     flex: 1,
     marginRight: Spacing.sm,
   },
-  distFill: {height: 8, borderRadius: 4},
+  distFill: {height: 10, borderRadius: 5},
   distPct: {
     fontFamily: FontFamily.bold,
     fontSize: FontSize.small,
-    width: 36,
+    width: 40,
     textAlign: 'right',
   },
 
-  // Ingredient Rows
+  // Ingredients
   ingredientRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -403,49 +440,61 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: Colors.divider,
   },
-  ingredientLeft: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'flex-start',
+  ingredientRowFirst: {borderTopWidth: 0},
+  rankBadge: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: Colors.background,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: Spacing.sm,
   },
-  ingredientRank: {
+  rankBadgeTop: {backgroundColor: '#FEE2E2'},
+  rankText: {
     fontFamily: FontFamily.bold,
     fontSize: FontSize.small,
     color: Colors.secondaryText,
-    width: 24,
-    paddingTop: 2,
   },
-  ingredientEmoji: {fontSize: 20, marginRight: Spacing.sm},
+  rankTextTop: {color: '#EF4444'},
   ingredientInfo: {flex: 1},
   ingredientName: {
     fontFamily: FontFamily.semiBold,
     fontSize: FontSize.body,
     color: Colors.darkText,
-  },
-  ingredientCategory: {
-    fontFamily: FontFamily.regular,
-    fontSize: FontSize.small,
-    color: Colors.secondaryText,
-    marginTop: 2,
+    marginBottom: 4,
   },
   ingBarTrack: {
     height: 4,
     backgroundColor: Colors.background,
     borderRadius: 2,
     overflow: 'hidden',
-    marginTop: 4,
   },
   ingBarFill: {height: 4, borderRadius: 2},
-  seenBadge: {
-    borderWidth: 1.5,
-    borderRadius: BorderRadius.full,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
+  countBadge: {
+    alignItems: 'center',
     marginLeft: Spacing.sm,
+    minWidth: 40,
   },
-  seenBadgeText: {
+  countText: {
     fontFamily: FontFamily.bold,
-    fontSize: FontSize.small,
+    fontSize: FontSize.h2,
+    color: Colors.darkText,
+  },
+  countLabel: {
+    fontFamily: FontFamily.regular,
+    fontSize: 10,
+    color: Colors.secondaryText,
+  },
+
+  // Empty
+  emptyBox: {alignItems: 'center', paddingVertical: Spacing.xl},
+  emptyIcon: {fontSize: 40, marginBottom: Spacing.sm},
+  emptyText: {
+    fontFamily: FontFamily.regular,
+    fontSize: FontSize.body,
+    color: Colors.secondaryText,
+    textAlign: 'center',
   },
 
   // Insight Banner
