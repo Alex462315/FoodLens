@@ -133,6 +133,18 @@ CORS_ALLOWED_ORIGINS = os.getenv(
 CORS_ALLOW_ALL_ORIGINS = DEBUG  # Allow all in dev mode
 
 
+# Email — currently using console backend so OTPs print to the Django terminal.
+# To switch to real SMTP for production, replace the EMAIL_BACKEND line with:
+#   EMAIL_BACKEND    = 'django.core.mail.backends.smtp.EmailBackend'
+#   EMAIL_HOST       = 'smtp.gmail.com'
+#   EMAIL_PORT       = 587
+#   EMAIL_USE_TLS    = True
+#   EMAIL_HOST_USER  = os.getenv('EMAIL_HOST_USER')
+#   EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD')
+EMAIL_BACKEND     = 'django.core.mail.backends.console.EmailBackend'
+DEFAULT_FROM_EMAIL = 'noreply@foodlens.app'
+
+
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
 
