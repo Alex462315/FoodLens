@@ -95,3 +95,35 @@ export const updateHealthProfile = async (
 export const deleteHealthProfile = async (id: number): Promise<void> => {
   await apiClient.delete(`/health-profiles/${id}/`);
 };
+
+// ---------------------------------------------------------------------------
+// Supported Conditions & Allergies (canonical lists from backend)
+// ---------------------------------------------------------------------------
+
+export interface SupportedCondition {
+  name: string;
+  icon: string;
+  description: string;
+}
+
+/**
+ * Fetch the canonical list of supported health conditions from the backend.
+ * These names exactly match the ConditionMultiplier table keys — using any
+ * other string will silently produce no scoring effect.
+ */
+export const getSupportedConditions = async (): Promise<SupportedCondition[]> => {
+  const response = await apiClient.get<{conditions: SupportedCondition[]}>(
+    '/health-profiles/supported-conditions/',
+  );
+  return response.data.conditions;
+};
+
+/**
+ * Fetch the canonical list of common allergen names from the backend.
+ */
+export const getSupportedAllergies = async (): Promise<string[]> => {
+  const response = await apiClient.get<{allergies: string[]}>(
+    '/health-profiles/supported-allergies/',
+  );
+  return response.data.allergies;
+};
