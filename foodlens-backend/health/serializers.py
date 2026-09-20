@@ -87,7 +87,15 @@ class HealthProfileSerializer(serializers.ModelSerializer):
     def validate_conditions(self, value):
         """
         Validate list of condition objects (or fallback strings).
+        Rejects condition_name values not in the SUPPORTED_CONDITIONS canonical list
+        to prevent silent scoring failures from typos or free-text variations.
         """
+        # Canonical condition names — must exactly match ConditionMultiplier table keys.
+        VALID_CONDITION_NAMES = {
+            'Diabetes', 'Hypertension', 'Heart Disease',
+            'Obesity', 'Kidney Disease', 'Celiac Disease', 'ADHD',
+        }
+
         if not isinstance(value, list):
             raise serializers.ValidationError('Conditions must be a list.')
 
@@ -96,6 +104,11 @@ class HealthProfileSerializer(serializers.ModelSerializer):
             if isinstance(item, str):
                 item_name = item.strip()
                 if item_name:
+                    if item_name not in VALID_CONDITION_NAMES:
+                        raise serializers.ValidationError(
+                            f'"{item_name}" is not a recognized condition. '
+                            f'Valid options are: {", ".join(sorted(VALID_CONDITION_NAMES))}.'
+                        )
                     validated.append({
                         'condition_name': item_name,
                         'severity': 'moderate',
@@ -105,6 +118,11 @@ class HealthProfileSerializer(serializers.ModelSerializer):
                 severity = item.get('severity', 'moderate').lower()
                 if not c_name:
                     raise serializers.ValidationError('Each condition must have a condition_name.')
+                if c_name not in VALID_CONDITION_NAMES:
+                    raise serializers.ValidationError(
+                        f'"{c_name}" is not a recognized condition. '
+                        f'Valid options are: {", ".join(sorted(VALID_CONDITION_NAMES))}.'
+                    )
                 if severity not in ['mild', 'moderate', 'severe']:
                     raise serializers.ValidationError('Severity must be mild, moderate, or severe.')
                 validated.append({
