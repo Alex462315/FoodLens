@@ -21,3 +21,14 @@ Thumbs.db
 # Build outputs
 dist/
 build/
+
+# Large files (GitHub 100MB limit)
+*.zip
+*.tar.gz
+
+# Python virtual env
+venv/
+__pycache__/
+
+# Temp Excel locks
+~$*
