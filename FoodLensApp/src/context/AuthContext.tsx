@@ -33,6 +33,7 @@ export interface User {
   id: number;
   username: string;
   email: string;
+  is_staff: boolean;
 }
 
 interface AuthContextType {
@@ -99,6 +100,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({children}) => {
       id: authResponse.id,
       username: authResponse.username,
       email: authResponse.email,
+      is_staff: authResponse.is_staff ?? false,
     };
 
     // Save to state

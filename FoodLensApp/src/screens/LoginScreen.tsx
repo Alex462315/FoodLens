@@ -12,6 +12,7 @@ import {
   ScrollView,
   KeyboardAvoidingView,
   Platform,
+  TouchableOpacity,
 } from 'react-native';
 import {Colors} from '../theme/colors';
 import {Typography, FontFamily} from '../theme/typography';
@@ -110,6 +111,13 @@ const LoginScreen: React.FC<LoginScreenProps> = ({navigation}) => {
             />
           </View>
 
+          {/* Forgot Password */}
+          <TouchableOpacity
+            style={styles.forgotLink}
+            onPress={() => navigation.navigate('ForgotPassword')}>
+            <Text style={styles.forgotText}>Forgot password?</Text>
+          </TouchableOpacity>
+
           {/* Submit Button */}
           <PrimaryButton
             title="Log In"
@@ -171,6 +179,16 @@ const styles = StyleSheet.create({
   },
   form: {
     marginBottom: Spacing.xl,
+  },
+  forgotLink: {
+    alignSelf: 'flex-end',
+    marginBottom: Spacing.base,
+    marginTop: -Spacing.sm,
+  },
+  forgotText: {
+    fontFamily: FontFamily.semiBold,
+    fontSize: 14,
+    color: Colors.primaryGreen,
   },
   linkContainer: {
     flexDirection: 'row',
