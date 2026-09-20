@@ -7,7 +7,8 @@ import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const API_BASE_URL = __DEV__
-  ? 'http://localhost:8000/api' // USB: adb reverse tcp:8000 tcp:8000
+  ? 'http://localhost:8000/api' // USB: uses adb reverse tcp:8000 tcp:8000
+  // Wi-Fi alternative: 'http://192.168.1.38:8000/api'  (phone+PC same Wi-Fi)
   : 'https://your-production-url.com/api';
 
 const apiClient = axios.create({
