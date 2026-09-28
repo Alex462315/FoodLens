@@ -45,3 +45,47 @@ export const lookupProductByBarcode = async (
   );
   return response.data;
 };
+
+export interface ProductAlternative {
+  id: string;
+  name: string;
+  brand: string;
+  category: string;
+  image_url: string;
+  normalized_score: number;
+  risk_label: string;
+  why_better: string;
+  nutrition: NutritionData;
+  contains_allergens: string[];
+}
+
+export interface AlternativesResponse {
+  product_name: string;
+  detected_category: string;
+  profile_applied: string | null;
+  count: number;
+  alternatives: ProductAlternative[];
+}
+
+/**
+ * Fetch personalized healthier alternatives for a scanned product.
+ */
+export const getProductAlternatives = async (params: {
+  productName: string;
+  categories?: string;
+  ingredientsText?: string;
+  profileId?: number | null;
+}): Promise<AlternativesResponse> => {
+  const response = await apiClient.get<AlternativesResponse>(
+    '/products/alternatives/',
+    {
+      params: {
+        product_name: params.productName,
+        categories: params.categories || '',
+        ingredients_text: params.ingredientsText || '',
+        profile_id: params.profileId ? String(params.profileId) : '',
+      },
+    },
+  );
+  return response.data;
+};
