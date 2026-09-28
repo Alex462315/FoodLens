@@ -3,7 +3,7 @@ Accounts app — Registration (Step 1) and Login (Step 2) views.
 """
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.authtoken.models import Token
 
@@ -90,30 +90,47 @@ def google_login_view(request):
     from google.oauth2 import id_token as google_id_token
     from google.auth.transport import requests as google_requests
 
-    token = request.data.get('id_token', '').strip()
-    if not token:
+    raw_token = request.data.get('id_token', '').strip()
+    if not raw_token:
         return Response(
             {'error': 'id_token is required.'},
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    web_client_id = os.getenv('GOOGLE_WEB_CLIENT_ID', '')
+    web_client_id = os.getenv('GOOGLE_WEB_CLIENT_ID', '').strip()
+    android_client_id = os.getenv('GOOGLE_ANDROID_CLIENT_ID', '').strip()
+
     if not web_client_id:
         return Response(
             {'error': 'Google Sign-In is not configured on the server.'},
             status=status.HTTP_503_SERVICE_UNAVAILABLE,
         )
 
-    # Verify the ID token with Google
-    try:
-        idinfo = google_id_token.verify_oauth2_token(
-            token,
-            google_requests.Request(),
-            web_client_id,
-        )
-    except ValueError:
+    # Try verifying against both web and android client IDs.
+    # Also allow 5-min clock skew to fix first-click token expiry errors.
+    client_ids_to_try = [cid for cid in [web_client_id, android_client_id] if cid]
+    idinfo = None
+    last_error = None
+    google_request = google_requests.Request()
+
+    for client_id in client_ids_to_try:
+        try:
+            idinfo = google_id_token.verify_oauth2_token(
+                raw_token,
+                google_request,
+                client_id,
+                clock_skew_in_seconds=300,
+            )
+            break
+        except ValueError as e:
+            last_error = e
+            idinfo = None
+
+    if idinfo is None:
+        import logging
+        logging.getLogger(__name__).warning('Google token verify failed: %s', last_error)
         return Response(
-            {'error': 'Invalid Google token.'},
+            {'error': 'Invalid Google token. Please try signing in again.'},
             status=status.HTTP_401_UNAUTHORIZED,
         )
 
@@ -155,6 +172,75 @@ def google_login_view(request):
             'email': user.email,
             'is_staff': user.is_staff,
             'token': auth_token.key,
+        },
+        status=status.HTTP_200_OK,
+    )
+
+
+@api_view(['PUT'])
+@permission_classes([IsAuthenticated])
+def update_username_view(request):
+    """
+    PUT /api/auth/update-username/
+
+    Allows an authenticated user to change their username.
+
+    Request body:
+        { "username": "<new-username>" }
+
+    Returns updated user info (same format as login_view).
+    """
+    import re
+    from django.contrib.auth.models import User
+
+    new_username = request.data.get('username', '').strip()
+
+    if not new_username:
+        return Response(
+            {'error': 'Username is required.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Validate length
+    if len(new_username) < 3 or len(new_username) > 30:
+        return Response(
+            {'error': 'Username must be 3–30 characters long.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Validate characters (alphanumeric, underscores, dots, hyphens)
+    if not re.match(r'^[a-zA-Z0-9._-]+$', new_username):
+        return Response(
+            {'error': 'Username can only contain letters, numbers, dots, hyphens, and underscores.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Check if the new username is the same as current
+    if request.user.username == new_username:
+        return Response(
+            {'error': 'New username is the same as your current one.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Check uniqueness (case-insensitive)
+    if User.objects.filter(username__iexact=new_username).exclude(pk=request.user.pk).exists():
+        return Response(
+            {'error': 'This username is already taken.'},
+            status=status.HTTP_409_CONFLICT,
+        )
+
+    # Update
+    request.user.username = new_username
+    request.user.save()
+
+    token, _ = Token.objects.get_or_create(user=request.user)
+    return Response(
+        {
+            'id': request.user.id,
+            'username': request.user.username,
+            'email': request.user.email,
+            'is_staff': request.user.is_staff,
+            'token': token.key,
         },
         status=status.HTTP_200_OK,
     )

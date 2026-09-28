@@ -17,4 +17,11 @@ urlpatterns = [
     path('community/submit/', views.community_submit_view, name='community-submit'),
     path('ocr-extract/', views.ocr_extract_view, name='ocr-extract'),
     path('ocr-clean/', views.ocr_clean_view, name='ocr-clean'),
+    # Calorie tracking
+    path('calorie-goal/', views.calorie_goal_view, name='calorie-goal'),
+    path('food-entries/', views.manual_food_entries_view, name='food-entries'),
+    path('food-entries/<int:pk>/', views.delete_food_entry_view, name='food-entry-delete'),
+    path('daily-calorie-summary/', views.daily_calorie_summary_view, name='daily-calorie-summary'),
+    path('analyze-food-photo/', views.analyze_food_photo_view, name='analyze-food-photo'),
+    path('calorie-check/', views.calorie_check_product_view, name='calorie-check'),
 ]
