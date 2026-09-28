@@ -22,6 +22,7 @@ import {
   registerUser,
   loginUser,
   googleLoginUser,
+  updateUsername as updateUsernameAPI,
   RegisterPayload,
   LoginPayload,
   AuthResponse,
@@ -45,6 +46,7 @@ interface AuthContextType {
   login: (payload: LoginPayload) => Promise<void>;
   register: (payload: RegisterPayload) => Promise<void>;
   googleLogin: (idToken: string) => Promise<void>;
+  updateUsername: (newUsername: string) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -143,6 +145,14 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({children}) => {
   }, []);
 
   /**
+   * Update username. On success, updates both server and local state.
+   */
+  const updateUsername = useCallback(async (newUsername: string) => {
+    const response = await updateUsernameAPI(newUsername);
+    await saveAuth(response);
+  }, []);
+
+  /**
    * Logout: clear stored token and user, reset state.
    */
   const logout = useCallback(async () => {
@@ -171,6 +181,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({children}) => {
         login,
         register,
         googleLogin,
+        updateUsername,
         logout,
       }}>
       {children}

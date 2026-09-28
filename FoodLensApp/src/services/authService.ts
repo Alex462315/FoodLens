@@ -68,3 +68,17 @@ export const googleLoginUser = async (
   );
   return response.data;
 };
+
+/**
+ * Update the current user's username.
+ * PUT /api/auth/update-username/
+ */
+export const updateUsername = async (
+  username: string,
+): Promise<AuthResponse> => {
+  const response = await apiClient.put<AuthResponse>(
+    '/auth/update-username/',
+    {username},
+  );
+  return response.data;
+};

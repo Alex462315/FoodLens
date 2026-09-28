@@ -15,6 +15,7 @@ import {
   TouchableOpacity,
 } from 'react-native';
 import {Colors} from '../theme/colors';
+import {useTheme} from '../theme';
 import {Typography, FontFamily, FontSize} from '../theme/typography';
 import {Spacing, BorderRadius} from '../theme/spacing';
 
@@ -31,9 +32,10 @@ const FormInput: React.FC<FormInputProps> = ({
   secureTextEntry,
   ...textInputProps
 }) => {
+  const { colors } = useTheme();
   const [isFocused, setIsFocused] = useState(false);
   const [isPasswordVisible, setIsPasswordVisible] = useState(false);
-  const hideTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const isPassword = Boolean(secureTextEntry);
 
@@ -66,16 +68,21 @@ const FormInput: React.FC<FormInputProps> = ({
 
   return (
     <View style={[styles.container, containerStyle]}>
-      <Text style={styles.label}>{label}</Text>
+      <Text style={[styles.label, { color: colors.darkText }]}>{label}</Text>
       <View style={styles.inputWrapper}>
         <RNTextInput
           style={[
             styles.input,
+            {
+              backgroundColor: colors.surface,
+              borderColor: colors.border,
+              color: colors.darkText,
+            },
             isPassword && styles.inputWithEye,
-            isFocused && styles.inputFocused,
-            error ? styles.inputError : null,
+            isFocused && { borderColor: colors.primaryGreen, borderWidth: 1.5 },
+            error ? { borderColor: colors.red, borderWidth: 1.5 } : null,
           ]}
-          placeholderTextColor={Colors.lightText}
+          placeholderTextColor={colors.lightText}
           onFocus={() => setIsFocused(true)}
           onBlur={() => setIsFocused(false)}
           secureTextEntry={isPassword ? !isPasswordVisible : false}

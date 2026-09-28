@@ -10,6 +10,7 @@ import RegisterScreen from '../screens/RegisterScreen';
 import LoginScreen from '../screens/LoginScreen';
 import ForgotPasswordScreen from '../screens/ForgotPasswordScreen';
 import {Colors} from '../theme/colors';
+import {useTheme} from '../theme';
 import {FontFamily} from '../theme/typography';
 
 export type AuthStackParamList = {
@@ -22,20 +23,22 @@ export type AuthStackParamList = {
 const Stack = createNativeStackNavigator<AuthStackParamList>();
 
 const AuthNavigator: React.FC = () => {
+  const { colors } = useTheme();
+
   return (
     <Stack.Navigator
       initialRouteName="Landing"
       screenOptions={{
         headerStyle: {
-          backgroundColor: Colors.background,
+          backgroundColor: colors.background,
         },
-        headerTintColor: Colors.primaryGreen,
+        headerTintColor: colors.primaryGreen,
         headerTitleStyle: {
           fontFamily: FontFamily.semiBold,
           fontSize: 18,
+          color: colors.darkText,
         },
         headerShadowVisible: false,
-        headerBackTitleVisible: false,
       }}>
       <Stack.Screen
         name="Landing"
