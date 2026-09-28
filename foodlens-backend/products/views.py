@@ -90,8 +90,32 @@ def product_lookup(request):
 
     data = off_response.json()
 
+    from scoring.models import CommunitySubmission
+
+    # Check for an approved community submission for this barcode
+    comm_sub = CommunitySubmission.objects.filter(barcode=barcode, status='approved').order_by('-reviewed_at').first()
+
     # OFF uses status=1 for found, status=0 for not found
     if data.get('status') != 1 or not data.get('product'):
+        if comm_sub:
+            return Response(
+                {
+                    'found': True,
+                    'barcode': barcode,
+                    'name': comm_sub.product_name,
+                    'brand': comm_sub.brand,
+                    'image_url': None,
+                    'ingredients_text': comm_sub.ingredients_text,
+                    'nutriscore_grade': None,
+                    'allergens': '',
+                    'categories': '',
+                    'nutrition': comm_sub.nutrition_data or {},
+                    'serving_size': None,
+                    'is_community_verified': True,
+                },
+                status=status.HTTP_200_OK,
+            )
+
         return Response(
             {
                 'found': False,
@@ -105,7 +129,8 @@ def product_lookup(request):
 
     # Extract the best available product name
     name = (
-        product.get('product_name')
+        (comm_sub.product_name if comm_sub and comm_sub.product_name else None)
+        or product.get('product_name')
         or product.get('product_name_en')
         or product.get('generic_name')
         or product.get('generic_name_en')
@@ -113,7 +138,11 @@ def product_lookup(request):
     )
 
     # Extract brand — OFF sometimes has multiple comma-separated brands
-    brand = product.get('brands', '') or 'Unknown Brand'
+    brand = (
+        (comm_sub.brand if comm_sub and comm_sub.brand else None)
+        or product.get('brands', '')
+        or 'Unknown Brand'
+    )
 
     # Extract product image — prefer front image
     image_url = (
@@ -129,6 +158,17 @@ def product_lookup(request):
         or product.get('ingredients_text')
         or ''
     )
+
+    # Incorporate verified community submission ingredients
+    if comm_sub and comm_sub.ingredients_text:
+        if not ingredients_text.strip():
+            ingredients_text = comm_sub.ingredients_text
+        else:
+            # If community submission contains missing ingredients not yet in Open Food Facts, include them
+            comm_tokens = [t.strip() for t in comm_sub.ingredients_text.split(',') if t.strip()]
+            for ct in comm_tokens:
+                if ct.lower() not in ingredients_text.lower():
+                    ingredients_text = f"{ingredients_text.rstrip(', ')}, {ct}"
 
     # Extract nutrition grade if available (nutriscore)
     nutriscore_grade = product.get('nutriscore_grade') or product.get('nutrition_grades') or None
@@ -168,6 +208,58 @@ def product_lookup(request):
             'categories': categories.strip(),
             'nutrition': nutrition_data,
             'serving_size': serving_size,
+        },
+        status=status.HTTP_200_OK,
+    )
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def product_alternatives_view(request):
+    """
+    GET /api/products/alternatives/
+
+    Query Parameters:
+        - product_name: Name of scanned product (e.g., "Nutella Hazelnut Spread")
+        - categories: Optional category string from Open Food Facts
+        - ingredients_text: Optional ingredients text
+        - profile_id: Optional ID of the user's active HealthProfile for allergen & condition filtering
+
+    Returns:
+        - category: Detected product category
+        - alternatives: List of 2-3 personalized healthier alternative choices
+    """
+    from .alternatives_service import find_healthier_alternatives, detect_product_category
+    from health.models import HealthProfile
+
+    product_name = request.query_params.get('product_name', '').strip()
+    categories = request.query_params.get('categories', '').strip()
+    ingredients_text = request.query_params.get('ingredients_text', '').strip()
+    profile_id_raw = request.query_params.get('profile_id', '').strip()
+
+    profile = None
+    if profile_id_raw and profile_id_raw.isdigit():
+        profile = HealthProfile.objects.filter(
+            id=int(profile_id_raw),
+            user=request.user,
+        ).first()
+
+    detected_category = detect_product_category(product_name, categories, ingredients_text)
+    alternatives = find_healthier_alternatives(
+        product_name=product_name,
+        categories=categories,
+        ingredients_text=ingredients_text,
+        profile=profile,
+        limit=3,
+    )
+
+    return Response(
+        {
+            'product_name': product_name,
+            'detected_category': detected_category,
+            'profile_applied': profile.profile_name if profile else None,
+            'count': len(alternatives),
+            'alternatives': alternatives,
         },
         status=status.HTTP_200_OK,
     )

@@ -28,7 +28,7 @@ import {RouteProp, useRoute, useNavigation} from '@react-navigation/native';
 import {Colors} from '../theme/colors';
 import {FontFamily, FontSize} from '../theme/typography';
 import {Spacing, BorderRadius, Shadow} from '../theme/spacing';
-import {extractTextFromImage} from '../services/ocrService';
+import {extractTextFromImage, cleanOcrText} from '../services/ocrService';
 import {parseIngredients, computeScore} from '../services/scoringService';
 import {getHealthProfiles, HealthProfile} from '../services/healthProfileService';
 
@@ -56,6 +56,8 @@ const OCRReviewScreen: React.FC = () => {
   const [confidence, setConfidence] = useState(0);
   const [warning, setWarning] = useState<string | null>(null);
   const [productLabel, setProductLabel] = useState('');
+  const [aiCleaning, setAiCleaning] = useState(false);
+  const [isAiCleaned, setIsAiCleaned] = useState(false);
 
   const [errorMsg, setErrorMsg] = useState('');
 
@@ -79,9 +81,14 @@ const OCRReviewScreen: React.FC = () => {
   const runOCR = useCallback(async () => {
     setStage('extracting');
     setErrorMsg('');
+    setIsAiCleaned(false);
     try {
       const result = await extractTextFromImage(imageUri);
-      setRawText(result.raw_text || '');
+      const text = result.cleaned_text || result.raw_text || '';
+      setRawText(text);
+      if (result.cleaned_text && result.cleaned_text !== result.raw_text) {
+        setIsAiCleaned(true);
+      }
       setConfidence(result.confidence);
       setWarning(result.warning || null);
       setStage('review');
@@ -94,6 +101,21 @@ const OCRReviewScreen: React.FC = () => {
       setStage('error');
     }
   }, [imageUri]);
+
+  const handleAiClean = async () => {
+    if (!rawText.trim()) return;
+    setAiCleaning(true);
+    try {
+      const cleaned = await cleanOcrText(rawText);
+      setRawText(cleaned);
+      setIsAiCleaned(true);
+      Alert.alert('✨ AI Cleaned', 'Gemini corrected OCR typos, artifacts, and spacing.');
+    } catch {
+      Alert.alert('Notice', 'Could not clean text right now. You can edit it manually.');
+    } finally {
+      setAiCleaning(false);
+    }
+  };
 
   useEffect(() => {
     runOCR();
@@ -314,10 +336,26 @@ const OCRReviewScreen: React.FC = () => {
 
         {/* ── Extracted Text ─────────────────────────────────────── */}
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>📝 Extracted Text</Text>
-          <Text style={styles.cardSubtitle}>
-            You can edit this if OCR made mistakes before scoring.
-          </Text>
+          <View style={styles.cardTitleRow}>
+            <View style={{flex: 1, paddingRight: Spacing.sm}}>
+              <Text style={styles.cardTitle}>📝 Extracted Text</Text>
+              <Text style={styles.cardSubtitle}>
+                {isAiCleaned
+                  ? '✨ Cleaned & typos fixed by Gemini AI'
+                  : 'You can edit this if OCR made mistakes before scoring.'}
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={[styles.aiCleanBtn, (aiCleaning || !rawText.trim()) && styles.disabledBtn]}
+              onPress={handleAiClean}
+              disabled={aiCleaning || !rawText.trim()}>
+              {aiCleaning ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Text style={styles.aiCleanBtnText}>✨ AI Clean</Text>
+              )}
+            </TouchableOpacity>
+          </View>
           <TextInput
             style={styles.textArea}
             value={rawText}
@@ -473,6 +511,25 @@ const styles = StyleSheet.create({
     fontSize: FontSize.h2,
     color: Colors.darkText,
     marginBottom: 4,
+  },
+  cardTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: Spacing.xs,
+  },
+  aiCleanBtn: {
+    backgroundColor: Colors.primaryGreen,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 6,
+    borderRadius: BorderRadius.full,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  aiCleanBtnText: {
+    fontFamily: FontFamily.bold,
+    fontSize: FontSize.caption,
+    color: '#FFFFFF',
   },
   cardSubtitle: {
     fontFamily: FontFamily.regular,

@@ -9,6 +9,7 @@ import apiClient from './apiClient';
 
 export interface OCRResult {
   raw_text: string;
+  cleaned_text?: string;
   confidence: number;   // 0–100, genuine Tesseract per-word average
   warning?: string;     // present when no text could be extracted
 }
@@ -43,4 +44,16 @@ export const extractTextFromImage = async (imageUri: string): Promise<OCRResult>
   );
 
   return response.data;
+};
+
+/**
+ * Request Gemini to clean up OCR typos from noisy text.
+ */
+export const cleanOcrText = async (text: string): Promise<string> => {
+  const response = await apiClient.post<{cleaned_text: string}>(
+    '/scoring/ocr-clean/',
+    {text},
+    {timeout: 20000},
+  );
+  return response.data.cleaned_text || text;
 };

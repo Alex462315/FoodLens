@@ -19,20 +19,41 @@ import {
   Alert,
   ActivityIndicator,
 } from 'react-native';
+import {useRoute} from '@react-navigation/native';
 import {Colors} from '../theme/colors';
 import {FontFamily, FontSize} from '../theme/typography';
 import {Spacing, BorderRadius, Shadow} from '../theme/spacing';
 import apiClient from '../services/apiClient';
 
 const CommunitySubmitScreen: React.FC = () => {
-  const [productName, setProductName] = useState('');
-  const [brand, setBrand] = useState('');
-  const [barcode, setBarcode] = useState('');
-  const [ingredientsText, setIngredientsText] = useState('');
-  const [calories, setCalories] = useState('');
-  const [fat, setFat] = useState('');
-  const [sugar, setSugar] = useState('');
-  const [salt, setSalt] = useState('');
+  const route = useRoute();
+  const {
+    prefillBarcode,
+    prefillProductName,
+    prefillBrand,
+    prefillIngredients,
+    prefillCalories,
+    prefillFat,
+    prefillSugar,
+    prefillSalt,
+  } = (route.params as any) ?? {};
+
+  const [productName, setProductName] = useState(prefillProductName || '');
+  const [brand, setBrand] = useState(prefillBrand || '');
+  const [barcode, setBarcode] = useState(prefillBarcode || '');
+  const [ingredientsText, setIngredientsText] = useState(prefillIngredients || '');
+  const [calories, setCalories] = useState(
+    prefillCalories != null && prefillCalories !== '' ? String(prefillCalories) : '',
+  );
+  const [fat, setFat] = useState(
+    prefillFat != null && prefillFat !== '' ? String(prefillFat) : '',
+  );
+  const [sugar, setSugar] = useState(
+    prefillSugar != null && prefillSugar !== '' ? String(prefillSugar) : '',
+  );
+  const [salt, setSalt] = useState(
+    prefillSalt != null && prefillSalt !== '' ? String(prefillSalt) : '',
+  );
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
@@ -61,9 +82,12 @@ const CommunitySubmitScreen: React.FC = () => {
         notes: notes.trim(),
       });
       setSubmitted(true);
-    } catch {
-      // Store locally — backend pending in Phase 2 (show success anyway for demo)
-      setSubmitted(true);
+    } catch (err: any) {
+      console.warn('Community submit error:', err?.response?.data || err?.message);
+      Alert.alert(
+        'Submission Error',
+        err?.response?.data?.error || 'Failed to submit to community database. Please try again.',
+      );
     } finally {
       setSubmitting(false);
     }
