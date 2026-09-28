@@ -12,6 +12,7 @@ import MoreScreen from '../screens/MoreScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 import ChangePasswordScreen from '../screens/ChangePasswordScreen';
 import {Colors} from '../theme/colors';
+import {useTheme} from '../theme';
 import {FontFamily} from '../theme/typography';
 
 export type MoreStackParamList = {
@@ -23,14 +24,15 @@ export type MoreStackParamList = {
 const Stack = createNativeStackNavigator<MoreStackParamList>();
 
 const MoreNavigator: React.FC = () => {
+  const { colors } = useTheme();
+
   return (
     <Stack.Navigator
       screenOptions={{
-        headerStyle:        {backgroundColor: Colors.background},
-        headerTintColor:    Colors.primaryGreen,
-        headerTitleStyle:   {fontFamily: FontFamily.semiBold, fontSize: 18},
+        headerStyle:        {backgroundColor: colors.background},
+        headerTintColor:    colors.primaryGreen,
+        headerTitleStyle:   {fontFamily: FontFamily.semiBold, fontSize: 18, color: colors.darkText},
         headerShadowVisible: false,
-        headerBackTitleVisible: false,
       }}>
       <Stack.Screen
         name="MoreHome"

@@ -1,5 +1,6 @@
 /**
  * HomeScreen — Dashboard with real user data.
+ * Fully responsive to Light & Dark theme.
  *
  * Features:
  *   - Personalized greeting using logged-in username
@@ -21,7 +22,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import {useFocusEffect, useNavigation} from '@react-navigation/native';
-import {Colors} from '../theme/colors';
+import {useTheme} from '../theme/ThemeContext';
 import {Typography, FontFamily, FontSize} from '../theme/typography';
 import {Spacing, BorderRadius, Shadow} from '../theme/spacing';
 import {HealthRiskScoreGauge, RiskBadge} from '../components';
@@ -30,6 +31,7 @@ import {getScanHistory, ScanHistoryItem} from '../services/scoringService';
 
 const HomeScreen: React.FC = () => {
   const {user, logout} = useAuth();
+  const {isDark, colors} = useTheme();
   const navigation = useNavigation<any>();
   const [recentScans, setRecentScans] = useState<ScanHistoryItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -65,32 +67,45 @@ const HomeScreen: React.FC = () => {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle="dark-content" backgroundColor={Colors.background} />
+    <SafeAreaView style={[styles.safeArea, {backgroundColor: colors.background}]}>
+      <StatusBar
+        barStyle={isDark ? 'light-content' : 'dark-content'}
+        backgroundColor={colors.background}
+      />
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}>
         {/* Header with Greeting and Logout */}
         <View style={styles.headerRow}>
-          <View>
-            <Text style={styles.greeting}>
+          {/* Greeting */}
+          <View style={styles.greetingContainer}>
+            <Text
+              style={[styles.greeting, {color: colors.darkText}]}
+              numberOfLines={2}>
               {getGreetingTime()}, {user?.username || 'User'} 👋
             </Text>
-            <Text style={styles.subGreeting}>
+            <Text style={[styles.subGreeting, {color: colors.secondaryText}]}>
               What would you like to scan today?
             </Text>
           </View>
+          {/* Logout button */}
           <TouchableOpacity onPress={logout} style={styles.logoutButton}>
             <Text style={styles.logoutText}>Logout</Text>
           </TouchableOpacity>
         </View>
 
         {/* Health Risk Score Card */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Health Risk Score</Text>
+        <View
+          style={[
+            styles.card,
+            {backgroundColor: colors.surface, borderColor: colors.border},
+          ]}>
+          <Text style={[styles.cardTitle, {color: colors.darkText}]}>
+            Health Risk Score
+          </Text>
           {loading ? (
             <View style={styles.gaugeContainer}>
-              <ActivityIndicator size="large" color={Colors.primaryGreen} />
+              <ActivityIndicator size="large" color={colors.primaryGreen} />
             </View>
           ) : latestScan ? (
             <View style={styles.gaugeContainer}>
@@ -99,7 +114,7 @@ const HomeScreen: React.FC = () => {
                 size={140}
                 showLabel={false}
               />
-              <Text style={styles.latestProductName}>
+              <Text style={[styles.latestProductName, {color: colors.secondaryText}]}>
                 {latestScan.product_name || 'Latest Scan'}
               </Text>
               <RiskBadge
@@ -114,12 +129,15 @@ const HomeScreen: React.FC = () => {
           ) : (
             <View style={styles.gaugeContainer}>
               <HealthRiskScoreGauge score={0} size={140} showLabel={false} />
-              <Text style={styles.emptyStateText}>No scans yet</Text>
+              <Text style={[styles.emptyStateText, {color: colors.secondaryText}]}>
+                No scans yet
+              </Text>
             </View>
           )}
           <TouchableOpacity
             style={[
               styles.viewDetailsButton,
+              {borderTopColor: colors.border},
               !latestScan && styles.viewDetailsButtonDisabled,
             ]}
             disabled={!latestScan}
@@ -127,7 +145,8 @@ const HomeScreen: React.FC = () => {
             <Text
               style={[
                 styles.viewDetailsText,
-                !latestScan && styles.viewDetailsTextDisabled,
+                {color: colors.primaryGreen},
+                !latestScan && {color: colors.lightText},
               ]}>
               View All Scans
             </Text>
@@ -137,36 +156,59 @@ const HomeScreen: React.FC = () => {
         {/* Quick Actions */}
         <View style={styles.quickActionsRow}>
           <TouchableOpacity
-            style={styles.quickActionCard}
+            style={[
+              styles.quickActionCard,
+              {backgroundColor: colors.surface, borderColor: colors.border},
+            ]}
             onPress={() => navigation.navigate('Scan')}
             activeOpacity={0.7}>
             <Text style={styles.quickActionIcon}>📸</Text>
-            <Text style={styles.quickActionLabel}>Scan Product</Text>
+            <Text style={[styles.quickActionLabel, {color: colors.darkText}]}>
+              Scan Product
+            </Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={styles.quickActionCard}
+            style={[
+              styles.quickActionCard,
+              {backgroundColor: colors.surface, borderColor: colors.border},
+            ]}
             onPress={() => navigation.navigate('Profile')}
             activeOpacity={0.7}>
             <Text style={styles.quickActionIcon}>👤</Text>
-            <Text style={styles.quickActionLabel}>My Profile</Text>
+            <Text style={[styles.quickActionLabel, {color: colors.darkText}]}>
+              My Profile
+            </Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={styles.quickActionCard}
+            style={[
+              styles.quickActionCard,
+              {backgroundColor: colors.surface, borderColor: colors.border},
+            ]}
             onPress={() => navigation.navigate('History')}
             activeOpacity={0.7}>
             <Text style={styles.quickActionIcon}>📋</Text>
-            <Text style={styles.quickActionLabel}>History</Text>
+            <Text style={[styles.quickActionLabel, {color: colors.darkText}]}>
+              History
+            </Text>
           </TouchableOpacity>
         </View>
 
         {/* Recent Scans */}
-        <View style={styles.card}>
+        <View
+          style={[
+            styles.card,
+            {backgroundColor: colors.surface, borderColor: colors.border},
+          ]}>
           <View style={styles.cardHeaderRow}>
-            <Text style={styles.cardTitle}>Recent Scans</Text>
+            <Text style={[styles.cardTitle, {color: colors.darkText}]}>
+              Recent Scans
+            </Text>
             {recentScans.length > 0 && (
               <TouchableOpacity
                 onPress={() => navigation.navigate('History')}>
-                <Text style={styles.seeAllText}>See All →</Text>
+                <Text style={[styles.seeAllText, {color: colors.primaryGreen}]}>
+                  See All →
+                </Text>
               </TouchableOpacity>
             )}
           </View>
@@ -174,14 +216,16 @@ const HomeScreen: React.FC = () => {
           {loading ? (
             <ActivityIndicator
               size="small"
-              color={Colors.primaryGreen}
+              color={colors.primaryGreen}
               style={{marginVertical: Spacing.lg}}
             />
           ) : recentScans.length === 0 ? (
             <View style={styles.emptyScansContainer}>
               <Text style={styles.emptyIcon}>📷</Text>
-              <Text style={styles.emptyTitle}>No scans yet</Text>
-              <Text style={styles.emptyDescription}>
+              <Text style={[styles.emptyTitle, {color: colors.darkText}]}>
+                No scans yet
+              </Text>
+              <Text style={[styles.emptyDescription, {color: colors.secondaryText}]}>
                 You haven't scanned any products yet — tap Scan to get started
               </Text>
             </View>
@@ -193,13 +237,18 @@ const HomeScreen: React.FC = () => {
               {recentScans.map(scan => {
                 const riskColors =
                   scan.risk_label === 'High'
-                    ? Colors.riskHigh
+                    ? colors.riskHigh
                     : scan.risk_label === 'Moderate'
-                    ? Colors.riskModerate
-                    : Colors.riskLow;
+                    ? colors.riskModerate
+                    : colors.riskLow;
 
                 return (
-                  <View key={scan.id} style={styles.recentScanCard}>
+                  <View
+                    key={scan.id}
+                    style={[
+                      styles.recentScanCard,
+                      {backgroundColor: colors.inputBg, borderColor: colors.border},
+                    ]}>
                     {/* Thumbnail */}
                     {scan.product_image_url ? (
                       <Image
@@ -208,15 +257,21 @@ const HomeScreen: React.FC = () => {
                         resizeMode="contain"
                       />
                     ) : (
-                      <View style={styles.recentScanImagePlaceholder}>
+                      <View
+                        style={[
+                          styles.recentScanImagePlaceholder,
+                          {backgroundColor: isDark ? '#132A1C' : colors.lightGreenBg},
+                        ]}>
                         <Text style={{fontSize: 24}}>📦</Text>
                       </View>
                     )}
                     {/* Name */}
-                    <Text style={styles.recentScanName} numberOfLines={2}>
+                    <Text
+                      style={[styles.recentScanName, {color: colors.darkText}]}
+                      numberOfLines={2}>
                       {scan.product_name || 'Unknown'}
                     </Text>
-                    {/* Score pill */}
+                    {/* Score badge */}
                     <View
                       style={[
                         styles.recentScanScorePill,
@@ -244,55 +299,55 @@ const HomeScreen: React.FC = () => {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: Colors.background,
   },
   scrollContent: {
     paddingHorizontal: Spacing.base,
     paddingBottom: Spacing['3xl'],
   },
-
-  // Header
   headerRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     paddingTop: Spacing.xl,
-    paddingBottom: Spacing.base,
+    paddingBottom: Spacing.md,
+  },
+  greetingContainer: {
+    flex: 1,
+    marginRight: Spacing.sm,
   },
   greeting: {
     fontFamily: FontFamily.bold,
     fontSize: FontSize.h1,
-    color: Colors.darkText,
   },
   subGreeting: {
-    ...Typography.body,
-    color: Colors.secondaryText,
-    marginTop: Spacing.xs,
+    fontFamily: FontFamily.regular,
+    fontSize: FontSize.caption,
+    marginTop: 2,
   },
   logoutButton: {
-    paddingVertical: Spacing.sm,
+    paddingVertical: 7,
     paddingHorizontal: Spacing.md,
     borderRadius: BorderRadius.md,
-    borderWidth: 1,
-    borderColor: Colors.red,
+    borderWidth: 1.5,
+    borderColor: '#EF4444',
+    alignSelf: 'center',
+    flexShrink: 0,
   },
   logoutText: {
     fontFamily: FontFamily.medium,
     fontSize: FontSize.caption,
-    color: Colors.red,
+    color: '#EF4444',
   },
 
   // Cards
   card: {
-    backgroundColor: Colors.surface,
     borderRadius: BorderRadius.xl,
     padding: Spacing.base,
     marginBottom: Spacing.base,
+    borderWidth: 1,
     ...Shadow.md,
   },
   cardTitle: {
     ...Typography.h2,
-    color: Colors.darkText,
     marginBottom: Spacing.sm,
   },
   cardHeaderRow: {
@@ -304,7 +359,6 @@ const styles = StyleSheet.create({
   seeAllText: {
     fontFamily: FontFamily.medium,
     fontSize: FontSize.caption,
-    color: Colors.primaryGreen,
   },
 
   // Gauge
@@ -315,13 +369,11 @@ const styles = StyleSheet.create({
   latestProductName: {
     fontFamily: FontFamily.medium,
     fontSize: FontSize.caption,
-    color: Colors.secondaryText,
     marginTop: Spacing.sm,
     marginBottom: Spacing.xs,
   },
   emptyStateText: {
     ...Typography.body,
-    color: Colors.secondaryText,
     marginTop: Spacing.sm,
   },
   viewDetailsButton: {
@@ -329,7 +381,6 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.sm,
     marginTop: Spacing.sm,
     borderTopWidth: 1,
-    borderTopColor: Colors.divider,
   },
   viewDetailsButtonDisabled: {
     opacity: 0.5,
@@ -337,10 +388,6 @@ const styles = StyleSheet.create({
   viewDetailsText: {
     fontFamily: FontFamily.semiBold,
     fontSize: FontSize.body,
-    color: Colors.primaryGreen,
-  },
-  viewDetailsTextDisabled: {
-    color: Colors.lightText,
   },
 
   // Quick Actions
@@ -351,8 +398,8 @@ const styles = StyleSheet.create({
   },
   quickActionCard: {
     flex: 1,
-    backgroundColor: Colors.surface,
     borderRadius: BorderRadius.lg,
+    borderWidth: 1,
     paddingVertical: Spacing.base,
     alignItems: 'center',
     ...Shadow.sm,
@@ -364,7 +411,6 @@ const styles = StyleSheet.create({
   quickActionLabel: {
     fontFamily: FontFamily.medium,
     fontSize: FontSize.small,
-    color: Colors.darkText,
   },
 
   // Empty Scans
@@ -378,12 +424,10 @@ const styles = StyleSheet.create({
   },
   emptyTitle: {
     ...Typography.h2,
-    color: Colors.darkText,
     marginBottom: Spacing.xs,
   },
   emptyDescription: {
     ...Typography.body,
-    color: Colors.secondaryText,
     textAlign: 'center',
   },
 
@@ -394,8 +438,8 @@ const styles = StyleSheet.create({
   },
   recentScanCard: {
     width: 120,
-    backgroundColor: Colors.background,
     borderRadius: BorderRadius.lg,
+    borderWidth: 1,
     padding: Spacing.sm,
     alignItems: 'center',
   },
@@ -409,7 +453,6 @@ const styles = StyleSheet.create({
     width: 60,
     height: 60,
     borderRadius: BorderRadius.md,
-    backgroundColor: Colors.lightGreenBg,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: Spacing.xs,
@@ -417,7 +460,6 @@ const styles = StyleSheet.create({
   recentScanName: {
     fontFamily: FontFamily.medium,
     fontSize: FontSize.small,
-    color: Colors.darkText,
     textAlign: 'center',
     marginBottom: Spacing.xs,
   },

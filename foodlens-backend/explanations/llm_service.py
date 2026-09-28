@@ -25,9 +25,9 @@ logger = logging.getLogger(__name__)
 # Configuration
 # ---------------------------------------------------------------------------
 
-# Model to use — gemini-3.5-flash is stable, fast, cheap, and produces
+# Model to use — gemini-3.6-flash is fast, active, and produces
 # excellent plain-language explanations from structured data.
-GEMINI_MODEL = 'gemini-3.5-flash'
+GEMINI_MODEL = 'gemini-3.6-flash'
 
 
 class ExplanationError(Exception):
@@ -191,7 +191,7 @@ def generate_explanation(scored_result: ScoredResult) -> str:
         client = genai.Client(api_key=api_key)
 
         # Call the model with resilient fallback
-        models_to_try = [GEMINI_MODEL, 'gemini-3.8-flash', 'gemini-3.5-flash']
+        models_to_try = [GEMINI_MODEL, 'gemini-3.6-flash', 'gemini-3.8-flash', 'gemini-3.5-flash', 'gemini-flash-latest']
         explanation_text = None
         last_error = None
 

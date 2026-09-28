@@ -1,6 +1,7 @@
 /**
  * BottomTabNavigator — 5-tab navigation matching the Figma design
  * Home | History | Scan (elevated, circular green) | Profile | More
+ * Fully responsive to Light and Dark mode.
  */
 
 import React from 'react';
@@ -11,20 +12,18 @@ import HistoryNavigator from './HistoryNavigator';
 import ScanNavigator from './ScanNavigator';
 import ProfileNavigator from './ProfileNavigator';
 import MoreNavigator from './MoreNavigator';
-import {Colors} from '../theme/colors';
+import {useTheme} from '../theme/ThemeContext';
 import {FontFamily, FontSize} from '../theme/typography';
 import {Shadow} from '../theme/spacing';
 
 const Tab = createBottomTabNavigator();
 
-// Icon component using text symbols (will be replaced with vector icons after npm install)
-const TabIcon: React.FC<{name: string; focused: boolean; isScan?: boolean}> = ({
-  name,
-  focused,
-  isScan,
-}) => {
-  // Map tab names to unicode/emoji icons as placeholder
-  // These will be swapped to react-native-vector-icons in a later step
+const TabIcon: React.FC<{
+  name: string;
+  focused: boolean;
+  isScan?: boolean;
+  colors: any;
+}> = ({name, focused, isScan, colors}) => {
   const iconMap: Record<string, string> = {
     Home: '🏠',
     History: '📋',
@@ -45,41 +44,57 @@ const TabIcon: React.FC<{name: string; focused: boolean; isScan?: boolean}> = ({
     <Text
       style={[
         styles.tabIcon,
-        {color: focused ? Colors.navActive : Colors.navInactive},
+        {color: focused ? colors.navActive : colors.navInactive},
       ]}>
       {iconMap[name]}
     </Text>
   );
 };
 
-// Custom Scan button (elevated, circular)
-const ScanTabButton: React.FC<{children: React.ReactNode; onPress?: () => void}> = ({
-  children,
-  onPress,
-}) => (
-  <TouchableOpacity
-    style={styles.scanButtonOuter}
-    onPress={onPress}
-    activeOpacity={0.85}>
-    <View style={styles.scanButtonInner}>{children}</View>
-  </TouchableOpacity>
-);
+const ScanTabButton = (props: any) => {
+  const {colors} = useTheme();
+  return (
+    <TouchableOpacity
+      style={styles.scanButtonOuter}
+      onPress={props.onPress}
+      activeOpacity={0.85}>
+      <View
+        style={[
+          styles.scanButtonInner,
+          {backgroundColor: colors.primaryGreen},
+        ]}>
+        {props.children}
+      </View>
+    </TouchableOpacity>
+  );
+};
 
 const BottomTabNavigator: React.FC = () => {
+  const {colors} = useTheme();
+
   return (
     <Tab.Navigator
       screenOptions={{
         headerShown: false,
-        tabBarStyle: styles.tabBar,
-        tabBarActiveTintColor: Colors.navActive,
-        tabBarInactiveTintColor: Colors.navInactive,
+        tabBarStyle: [
+          styles.tabBar,
+          {
+            backgroundColor: colors.navBg,
+            borderTopColor: colors.border,
+            borderTopWidth: StyleSheet.hairlineWidth,
+          },
+        ],
+        tabBarActiveTintColor: colors.navActive,
+        tabBarInactiveTintColor: colors.navInactive,
         tabBarLabelStyle: styles.tabLabel,
       }}>
       <Tab.Screen
         name="Home"
         component={HomeScreen}
         options={{
-          tabBarIcon: ({focused}) => <TabIcon name="Home" focused={focused} />,
+          tabBarIcon: ({focused}) => (
+            <TabIcon name="Home" focused={focused} colors={colors} />
+          ),
         }}
       />
       <Tab.Screen
@@ -87,7 +102,7 @@ const BottomTabNavigator: React.FC = () => {
         component={HistoryNavigator}
         options={{
           tabBarIcon: ({focused}) => (
-            <TabIcon name="History" focused={focused} />
+            <TabIcon name="History" focused={focused} colors={colors} />
           ),
         }}
       />
@@ -96,7 +111,7 @@ const BottomTabNavigator: React.FC = () => {
         component={ScanNavigator}
         options={{
           tabBarIcon: ({focused}) => (
-            <TabIcon name="Scan" focused={focused} isScan />
+            <TabIcon name="Scan" focused={focused} isScan colors={colors} />
           ),
           tabBarButton: props => <ScanTabButton {...props} />,
           tabBarLabel: () => null,
@@ -107,7 +122,7 @@ const BottomTabNavigator: React.FC = () => {
         component={ProfileNavigator}
         options={{
           tabBarIcon: ({focused}) => (
-            <TabIcon name="Profile" focused={focused} />
+            <TabIcon name="Profile" focused={focused} colors={colors} />
           ),
         }}
       />
@@ -115,7 +130,9 @@ const BottomTabNavigator: React.FC = () => {
         name="More"
         component={MoreNavigator}
         options={{
-          tabBarIcon: ({focused}) => <TabIcon name="More" focused={focused} />,
+          tabBarIcon: ({focused}) => (
+            <TabIcon name="More" focused={focused} colors={colors} />
+          ),
         }}
       />
     </Tab.Navigator>
@@ -124,8 +141,6 @@ const BottomTabNavigator: React.FC = () => {
 
 const styles = StyleSheet.create({
   tabBar: {
-    backgroundColor: Colors.surface,
-    borderTopWidth: 0,
     height: 64,
     paddingBottom: 8,
     paddingTop: 8,
@@ -147,7 +162,6 @@ const styles = StyleSheet.create({
     width: 60,
     height: 60,
     borderRadius: 30,
-    backgroundColor: Colors.primaryGreen,
     justifyContent: 'center',
     alignItems: 'center',
     ...Shadow.xl,
@@ -158,7 +172,7 @@ const styles = StyleSheet.create({
   },
   scanIcon: {
     fontSize: 24,
-    color: Colors.white,
+    color: '#FFFFFF',
   },
 });
 
