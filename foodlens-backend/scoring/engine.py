@@ -244,6 +244,30 @@ def parse_ingredients_text(raw_text: str) -> List[ParsedIngredient]:
             aliases_list=aliases_list
         )
 
+        # If not matched, check inside parentheses (e.g. "colour (caramel e150d)" -> "caramel e150d")
+        if not ingredient:
+            parens = re.findall(r'\(([^)]+)\)', raw_token)
+            for p in parens:
+                ingredient = _lookup_ingredient(
+                    p.strip(),
+                    ingredient_by_name=ingredient_by_name,
+                    ingredient_by_alias=ingredient_by_alias,
+                    ingredients_list=ingredients_list,
+                    aliases_list=aliases_list
+                )
+                if ingredient:
+                    break
+
+        # Also fallback to full raw_token (e.g. "carbonated water", "caffeine flavouring")
+        if not ingredient:
+            ingredient = _lookup_ingredient(
+                raw_token,
+                ingredient_by_name=ingredient_by_name,
+                ingredient_by_alias=ingredient_by_alias,
+                ingredients_list=ingredients_list,
+                aliases_list=aliases_list
+            )
+
         if ingredient:
             results.append({
                 'position': position,

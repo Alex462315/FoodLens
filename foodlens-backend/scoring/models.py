@@ -262,3 +262,83 @@ class ScoredIngredientDetail(models.Model):
     def __str__(self):
         return f"#{self.position} {self.raw_token} -> impact={self.ingredient_impact}"
 
+
+class CommunitySubmission(models.Model):
+    """
+    A user-submitted product for admin review before adding to the
+    ingredient database.
+
+    Abstract: "Community-Sourced Product Database — lets users submit
+    ingredient data for unrecognized regional or local products."
+
+    Status workflow: pending → approved / rejected (by admin)
+    """
+    STATUS_CHOICES = [
+        ('pending', 'Pending Review'),
+        ('approved', 'Approved'),
+        ('rejected', 'Rejected'),
+    ]
+
+    submitted_by = models.ForeignKey(
+        'auth.User',
+        on_delete=models.CASCADE,
+        related_name='community_submissions',
+        help_text='User who submitted this product',
+    )
+    product_name = models.CharField(
+        max_length=300,
+        help_text='Name of the product (required)',
+    )
+    brand = models.CharField(
+        max_length=200,
+        blank=True,
+        default='',
+        help_text='Brand or manufacturer name',
+    )
+    barcode = models.CharField(
+        max_length=50,
+        blank=True,
+        default='',
+        db_index=True,
+        help_text='Barcode (EAN-13/UPC) if available',
+    )
+    ingredients_text = models.TextField(
+        help_text='Raw ingredients text as printed on the label',
+    )
+    nutrition_data = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text='Optional nutrition info: {energy_kcal, fat, sugars, salt}',
+    )
+    notes = models.TextField(
+        blank=True,
+        default='',
+        help_text='Any additional notes from the submitter',
+    )
+    status = models.CharField(
+        max_length=10,
+        choices=STATUS_CHOICES,
+        default='pending',
+        db_index=True,
+    )
+    reviewed_by = models.ForeignKey(
+        'auth.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='reviewed_submissions',
+        help_text='Admin who reviewed this submission',
+    )
+    admin_notes = models.TextField(
+        blank=True,
+        default='',
+        help_text='Admin notes (e.g. reason for rejection)',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"[{self.status}] {self.product_name} by {self.submitted_by}"
