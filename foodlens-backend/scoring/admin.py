@@ -74,13 +74,41 @@ class ScoredResultAdmin(admin.ModelAdmin):
     ordering = ('-created_at',)
 
 
+from django.utils import timezone
+
+
 @admin.register(CommunitySubmission)
 class CommunitySubmissionAdmin(admin.ModelAdmin):
     list_display = (
-        'id', 'product_name', 'brand', 'submitted_by',
-        'status', 'created_at', 'reviewed_by',
+        'id', 'product_name', 'brand', 'barcode', 'submitted_by',
+        'status', 'created_at', 'reviewed_by', 'reviewed_at',
     )
     list_filter = ('status', 'created_at')
     search_fields = ('product_name', 'brand', 'barcode', 'submitted_by__username')
     readonly_fields = ('submitted_by', 'created_at', 'reviewed_at')
     ordering = ('-created_at',)
+    actions = ['approve_submissions', 'reject_submissions']
+
+    def save_model(self, request, obj, form, change):
+        if obj.status in ('approved', 'rejected') and not obj.reviewed_at:
+            obj.reviewed_by = request.user
+            obj.reviewed_at = timezone.now()
+        super().save_model(request, obj, form, change)
+
+    @admin.action(description="Approve selected submissions")
+    def approve_submissions(self, request, queryset):
+        count = queryset.update(
+            status='approved',
+            reviewed_by=request.user,
+            reviewed_at=timezone.now(),
+        )
+        self.message_user(request, f"{count} submission(s) approved and active in product lookup & risk scoring.")
+
+    @admin.action(description="Reject selected submissions")
+    def reject_submissions(self, request, queryset):
+        count = queryset.update(
+            status='rejected',
+            reviewed_by=request.user,
+            reviewed_at=timezone.now(),
+        )
+        self.message_user(request, f"{count} submission(s) rejected.")

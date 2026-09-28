@@ -342,3 +342,77 @@ class CommunitySubmission(models.Model):
 
     def __str__(self):
         return f"[{self.status}] {self.product_name} by {self.submitted_by}"
+
+
+class DailyCalorieGoal(models.Model):
+    """
+    Stores the user's daily calorie intake goal.
+    One active goal per user at any time.
+    """
+    user = models.OneToOneField(
+        'auth.User',
+        on_delete=models.CASCADE,
+        related_name='calorie_goal',
+    )
+    daily_goal_kcal = models.PositiveIntegerField(
+        default=2000,
+        validators=[MinValueValidator(500), MaxValueValidator(10000)],
+        help_text='User-defined daily calorie intake goal in kcal',
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.user.username} — goal: {self.daily_goal_kcal} kcal/day"
+
+
+class ManualFoodEntry(models.Model):
+    """
+    A manually logged food item (with or without photo) or a photo-analyzed meal.
+    Source: 'manual' (user typed it) or 'photo' (analyzed from camera snapshot).
+    """
+    SOURCE_CHOICES = [
+        ('manual', 'Manual Entry'),
+        ('photo',  'Photo Analysis'),
+    ]
+
+    user = models.ForeignKey(
+        'auth.User',
+        on_delete=models.CASCADE,
+        related_name='manual_food_entries',
+    )
+    food_name = models.CharField(
+        max_length=300,
+        help_text='Name of the food item',
+    )
+    calories_kcal = models.DecimalField(
+        max_digits=8,
+        decimal_places=2,
+        validators=[MinValueValidator(0)],
+        help_text='Estimated calories in kcal for the given serving',
+    )
+    protein_g = models.DecimalField(max_digits=6, decimal_places=2, default=0)
+    fat_g = models.DecimalField(max_digits=6, decimal_places=2, default=0)
+    carbs_g = models.DecimalField(max_digits=6, decimal_places=2, default=0)
+    serving_description = models.CharField(
+        max_length=200,
+        blank=True,
+        default='',
+        help_text='e.g. "1 cup", "100g", "1 plate"',
+    )
+    source = models.CharField(
+        max_length=10,
+        choices=SOURCE_CHOICES,
+        default='manual',
+    )
+    notes = models.TextField(blank=True, default='')
+    logged_at = models.DateField(
+        help_text='Date of consumption (defaults to today)',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.user.username}: {self.food_name} — {self.calories_kcal} kcal on {self.logged_at}"
