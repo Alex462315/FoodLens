@@ -1,9 +1,10 @@
 """
 Scoring app — Views for ingredient parsing and scoring endpoints.
 """
+from django.http import HttpResponse
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 
 from health.models import HealthProfile
@@ -144,7 +145,16 @@ def compute_score_view(request):
         'product_image_url': request.data.get('product_image_url', ''),
         'nutrition_data': request.data.get('nutrition', {}),
     }
-    result = compute_score(ingredients_data, profile, product_meta=product_meta)
+
+    try:
+        result = compute_score(ingredients_data, profile, product_meta=product_meta)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return Response(
+            {'error': f'Scoring computation failed: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
 
     return Response(result, status=status.HTTP_200_OK)
 
@@ -173,23 +183,232 @@ def scan_history_view(request):
             ...
         ]
     """
-    from .models import ScoredResult
+    from .models import ScoredResult, ScoredIngredientDetail
 
     scans = ScoredResult.objects.filter(
         profile__user=request.user
-    ).order_by('-created_at').values(
-        'id',
-        'barcode',
-        'product_name',
-        'product_image_url',
-        'normalized_score',
-        'risk_label',
-        'has_allergen_warning',
-        'allergen_details',
-        'created_at',
-    )[:50]  # Limit to last 50 scans
+    ).order_by('-created_at')[:50]
 
-    return Response(list(scans), status=status.HTTP_200_OK)
+    result = []
+    for s in scans:
+        result.append({
+            'id': s.id,
+            'barcode': s.barcode,
+            'product_name': s.product_name,
+            'product_image_url': s.product_image_url,
+            'normalized_score': str(s.normalized_score),
+            'risk_label': s.risk_label,
+            'has_allergen_warning': s.has_allergen_warning,
+            'allergen_details': s.allergen_details,
+            'nutrition_data': s.nutrition_data or {},
+            'created_at': s.created_at.isoformat(),
+        })
+
+    return Response(result, status=status.HTTP_200_OK)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def scan_detail_view(request, pk):
+    """
+    GET /api/scoring/history/<id>/
+
+    Returns the full detail of a single past scan — including
+    nutrition_data and ingredient_breakdown — so the HistoryScreen
+    can navigate to a re-rendered ProductResultScreen.
+    """
+    from .models import ScoredResult, ScoredIngredientDetail
+
+    try:
+        scan = ScoredResult.objects.get(pk=pk, profile__user=request.user)
+    except ScoredResult.DoesNotExist:
+        return Response({'error': 'Scan not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    breakdown = []
+    for d in ScoredIngredientDetail.objects.filter(scored_result=scan).select_related('ingredient'):
+        breakdown.append({
+            'original_name': d.original_name,
+            'matched_name': d.ingredient.name if d.ingredient else None,
+            'category': d.ingredient.category if d.ingredient else None,
+            'position': d.position,
+            'adjusted_risk_score': float(d.adjusted_risk_score),
+        })
+
+    return Response({
+        'id': scan.id,
+        'barcode': scan.barcode,
+        'product_name': scan.product_name,
+        'product_image_url': scan.product_image_url,
+        'normalized_score': float(scan.normalized_score),
+        'risk_label': scan.risk_label,
+        'has_allergen_warning': scan.has_allergen_warning,
+        'allergen_details': scan.allergen_details,
+        'nutrition_data': scan.nutrition_data or {},
+        'ingredient_breakdown': breakdown,
+        'created_at': scan.created_at.isoformat(),
+    }, status=status.HTTP_200_OK)
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def export_pdf_view(request, pk):
+    """
+    GET /api/scoring/history/<id>/pdf/?token=<auth_token>
+
+    Generates and downloads a personalized PDF health report for the given ScoredResult.
+    Supports auth via standard Authorization header OR query param ?token=... for direct browser downloads.
+    """
+    from .models import ScoredResult
+    from .pdf_service import generate_product_pdf
+    from rest_framework.authtoken.models import Token
+
+    user = request.user if request.user and request.user.is_authenticated else None
+    if not user:
+        token_key = request.query_params.get('token')
+        if token_key:
+            try:
+                user = Token.objects.get(key=token_key).user
+            except Token.DoesNotExist:
+                return Response({'error': 'Invalid token.'}, status=status.HTTP_401_UNAUTHORIZED)
+        else:
+            return Response({'error': 'Authentication required.'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    try:
+        scan = ScoredResult.objects.get(pk=pk, profile__user=user)
+    except ScoredResult.DoesNotExist:
+        return Response({'error': 'Scan result not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    # Check if there is an AI explanation cached
+    explanation_text = None
+    try:
+        if hasattr(scan, 'explanation'):
+            explanation_text = scan.explanation.explanation_text
+    except Exception:
+        pass
+
+    pdf_bytes = generate_product_pdf(scan, ai_explanation=explanation_text)
+
+    safe_name = "".join(c for c in (scan.product_name or 'Product') if c.isalnum() or c in (' ', '_', '-')).rstrip()
+    filename = f"FoodLens_Report_{safe_name}_{scan.id}.pdf".replace(' ', '_')
+    response = HttpResponse(pdf_bytes, content_type='application/pdf')
+    response['Content-Disposition'] = f'inline; filename="{filename}"'
+    return response
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def public_web_report_view(request, pk):
+    """
+    GET /api/scoring/report/<id>/
+
+    Public web health report page for QR code scanning.
+    Renders a responsive, mobile-optimized HTML card accessible from any smartphone browser.
+    """
+    from .models import ScoredResult
+    from django.utils.html import escape
+
+    try:
+        scan = ScoredResult.objects.get(pk=pk)
+    except ScoredResult.DoesNotExist:
+        return HttpResponse(
+            """<!DOCTYPE html><html><body style="font-family:sans-serif;text-align:center;padding:50px;">
+            <h2>Product Report Not Found</h2><p>This report may have been removed.</p></body></html>""",
+            content_type='text/html',
+            status=404,
+        )
+
+    score_num = round(float(scan.normalized_score))
+    risk_color = '#10B981' if score_num <= 35 else ('#F59E0B' if score_num <= 65 else '#EF4444')
+    risk_bg = '#ECFDF5' if score_num <= 35 else ('#FFFBEB' if score_num <= 65 else '#FEF2F2')
+    risk_label = scan.risk_label or ('Low Risk' if score_num <= 35 else ('Moderate Risk' if score_num <= 65 else 'High Risk'))
+
+    ingredients_html = ""
+    for detail in scan.ingredient_details.all().select_related('ingredient'):
+        name = escape(detail.ingredient.name if detail.ingredient else detail.raw_token)
+        cat = escape(detail.ingredient.category.replace('_', ' ').title() if detail.ingredient else 'Unclassified')
+        adj = f"{float(detail.adjusted_score):.1f}"
+        icon = '🟢' if float(detail.adjusted_score) <= 3 else ('🟡' if float(detail.adjusted_score) <= 6 else '🔴')
+        ingredients_html += f"""
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid #f1f5f9;">
+            <div>
+                <span style="font-weight:600;color:#1e293b;">{name}</span>
+                <span style="font-size:12px;color:#64748b;margin-left:8px;background:#f8fafc;padding:2px 8px;border-radius:10px;border:1px solid #e2e8f0;">{cat}</span>
+            </div>
+            <div style="font-size:13px;font-weight:700;color:#334155;">{icon} Risk {adj}/10</div>
+        </div>
+        """
+
+    allergen_html = ""
+    if scan.has_allergen_warning and scan.allergen_details:
+        allergens_str = escape(", ".join(scan.allergen_details))
+        allergen_html = f"""
+        <div style="background:#FEF2F2;border:1px solid #FCA5A5;border-radius:12px;padding:14px;margin-bottom:18px;display:flex;align-items:center;gap:10px;">
+            <span style="font-size:24px;">🚨</span>
+            <div>
+                <strong style="color:#991B1B;font-size:14px;">Allergen Warning Detected</strong>
+                <p style="margin:2px 0 0;color:#B91C1C;font-size:13px;">Contains: {allergens_str}</p>
+            </div>
+        </div>
+        """
+
+    prod_name = escape(scan.product_name or 'Scanned Product')
+    barcode_str = escape(scan.barcode or 'N/A')
+    date_str = scan.created_at.strftime('%b %d, %Y · %I:%M %p')
+
+    html_content = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FoodLens Health Report — {prod_name}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+        body {{ font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background: #0F172A; color: #1E293B; min-height: 100vh; padding: 20px 14px; display: flex; justify-content: center; }}
+        .card {{ background: #FFFFFF; border-radius: 24px; max-width: 480px; width: 100%; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.35); overflow: hidden; }}
+        .header {{ background: linear-gradient(135deg, #059669 0%, #10B981 100%); color: #FFFFFF; padding: 24px 20px 20px; }}
+        .brand {{ display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 15px; letter-spacing: 0.5px; opacity: 0.95; margin-bottom: 12px; }}
+        .prod-title {{ font-size: 22px; font-weight: 800; line-height: 1.25; margin-bottom: 4px; }}
+        .meta {{ font-size: 12px; opacity: 0.85; }}
+        .body {{ padding: 20px; }}
+        .score-box {{ background: {risk_bg}; border: 1.5px solid {risk_color}40; border-radius: 18px; padding: 18px; text-align: center; margin-bottom: 18px; }}
+        .score-val {{ font-size: 52px; font-weight: 800; color: {risk_color}; line-height: 1; }}
+        .score-max {{ font-size: 18px; font-weight: 600; color: #64748B; }}
+        .risk-badge {{ display: inline-block; background: {risk_color}; color: #FFFFFF; font-size: 13px; font-weight: 700; padding: 5px 16px; border-radius: 20px; margin-top: 8px; }}
+        .section-title {{ font-size: 13px; font-weight: 700; color: #64748B; text-transform: uppercase; letter-spacing: 0.7px; margin-bottom: 10px; }}
+        .ingredients-list {{ background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 14px; overflow: hidden; margin-bottom: 20px; }}
+        .footer {{ text-align: center; font-size: 11px; color: #94A3B8; padding: 0 0 20px; }}
+        .verified-badge {{ display: inline-flex; align-items: center; gap: 6px; background: #F1F5F9; color: #475569; font-size: 12px; font-weight: 600; padding: 6px 14px; border-radius: 20px; margin-bottom: 8px; }}
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="header">
+            <div class="brand">🥗 FOODLENS™ SAFETY VERIFIED</div>
+            <div class="prod-title">{prod_name}</div>
+            <div class="meta">Barcode: {barcode_str} · {date_str}</div>
+        </div>
+        <div class="body">
+            {allergen_html}
+            <div class="score-box">
+                <div class="score-val">{score_num}<span class="score-max">/100</span></div>
+                <div class="risk-badge">{risk_label}</div>
+            </div>
+            <div class="section-title">Analyzed Ingredients</div>
+            <div class="ingredients-list">
+                {ingredients_html}
+            </div>
+            <div class="footer">
+                <div class="verified-badge">🛡️ Verified by FoodLens AI Engine</div>
+                <p>Personalized Ingredient Risk & Nutritional Safety Analysis</p>
+            </div>
+        </div>
+    </div>
+</body>
+</html>"""
+    return HttpResponse(html_content, content_type='text/html')
+
 
 
 @api_view(['GET'])
@@ -306,6 +525,7 @@ def nutrition_summary_view(request):
     return Response({
         'period': period,
         'scan_count': scan_count,
+        'total_scans_in_period': scans.count(),   # includes scans without nutrition
         'totals': {k: round(v, 2) for k, v in totals.items()},
         'averages': averages,
         'daily_breakdown': daily_breakdown,
@@ -394,6 +614,8 @@ def community_submit_view(request):
 
     Abstract: "Community-Sourced Product Database."
     """
+    from .models import CommunitySubmission
+
     product_name = request.data.get('product_name', '').strip()
     ingredients_text = request.data.get('ingredients_text', '').strip()
 
@@ -403,18 +625,333 @@ def community_submit_view(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    # Log submission (in Phase 2 this would persist to a CommunitySubmission model)
-    import logging
-    logger = logging.getLogger(__name__)
-    logger.info(
-        'Community submission from user=%s: product=%s',
-        request.user.username, product_name,
+    submission = CommunitySubmission.objects.create(
+        submitted_by=request.user,
+        product_name=product_name,
+        brand=request.data.get('brand', '').strip(),
+        barcode=request.data.get('barcode', '').strip(),
+        ingredients_text=ingredients_text,
+        nutrition_data=request.data.get('nutrition', {}),
+        notes=request.data.get('notes', '').strip(),
     )
 
     return Response({
         'status': 'received',
+        'id': submission.id,
         'message': (
             f'Thank you! "{product_name}" has been submitted for review. '
             'It will be added to the FoodLens ingredient database after verification.'
         ),
     }, status=status.HTTP_201_CREATED)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OCR Extraction Endpoint
+# ─────────────────────────────────────────────────────────────────────────────
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def ocr_extract_view(request):
+    """
+    POST /api/scoring/ocr-extract/
+
+    Accepts a multipart image upload of a food product ingredient label.
+    Runs preprocessing (grayscale → CLAHE → deskew → binarize) then
+    Tesseract OCR, and returns the extracted text with a real confidence score.
+
+    Request (multipart/form-data):
+        image: <file>   — JPEG/PNG photo of ingredient label
+
+    Response:
+        {
+            "raw_text":   "Sugar, Salt, Water, ...",
+            "confidence": 82         ← genuine per-word average from Tesseract
+        }
+
+    The caller should feed raw_text directly into /api/scoring/parse-ingredients/
+    using the same flow as the barcode path.
+
+    Error responses:
+        400 — no image in request, or image cannot be decoded
+        503 — Tesseract binary not found / OCR library error
+    """
+    from .ocr_service import extract_text_from_image
+
+    # ── Validate upload ───────────────────────────────────────────────────────
+    image_file = request.FILES.get('image')
+    if not image_file:
+        return Response(
+            {'error': 'No image provided. Send a multipart/form-data request with an "image" field.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    allowed_types = {'image/jpeg', 'image/png', 'image/webp', 'image/bmp', 'image/tiff'}
+    if image_file.content_type not in allowed_types:
+        return Response(
+            {'error': f'Unsupported image type: {image_file.content_type}. Use JPEG or PNG.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    max_size_bytes = 15 * 1024 * 1024  # 15 MB
+    if image_file.size > max_size_bytes:
+        return Response(
+            {'error': 'Image too large. Maximum allowed size is 15 MB.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # ── Run OCR ───────────────────────────────────────────────────────────────
+    try:
+        image_bytes = image_file.read()
+        result = extract_text_from_image(image_bytes)
+    except FileNotFoundError as e:
+        # Tesseract binary missing or wrong path
+        return Response(
+            {
+                'error': 'OCR engine not available. Tesseract binary not found.',
+                'detail': str(e),
+            },
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+    except Exception as e:
+        return Response(
+            {
+                'error': 'OCR processing failed.',
+                'detail': str(e),
+            },
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+    # ── Return result ─────────────────────────────────────────────────────────
+    raw_text = result['raw_text']
+    confidence = result['confidence']
+
+    if not raw_text:
+        return Response(
+            {
+                'raw_text': '',
+                'cleaned_text': '',
+                'confidence': 0,
+                'warning': 'No text could be extracted from this image. '
+                           'Try retaking the photo with better lighting and a steady hand.',
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    # Clean OCR text using Gemini without modifying health claims
+    from explanations.llm_service import clean_ocr_text
+    cleaned_text = clean_ocr_text(raw_text)
+
+    return Response(
+        {
+            'raw_text': raw_text,
+            'cleaned_text': cleaned_text,
+            'confidence': confidence,
+        },
+        status=status.HTTP_200_OK,
+    )
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def ocr_clean_view(request):
+    """
+    POST /api/scoring/ocr-clean/
+
+    Cleans noisy raw OCR text using Gemini without modifying health claims.
+    Accepts: { "text": "noisy string" } or { "raw_text": "noisy string" }
+    Returns: { "raw_text": "...", "cleaned_text": "..." }
+    """
+    from explanations.llm_service import clean_ocr_text
+
+    text = request.data.get('text', '') or request.data.get('raw_text', '')
+    if not text.strip():
+        return Response({'raw_text': '', 'cleaned_text': ''}, status=status.HTTP_200_OK)
+
+    cleaned = clean_ocr_text(text)
+    return Response({
+        'raw_text': text,
+        'cleaned_text': cleaned,
+    }, status=status.HTTP_200_OK)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Admin Community Submission Endpoints
+# ─────────────────────────────────────────────────────────────────────────────
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def admin_submissions_list(request):
+    """
+    GET /api/admin/submissions/?status=pending
+
+    Returns all community submissions, optionally filtered by status.
+    Staff-only endpoint.
+    """
+    if not request.user.is_staff:
+        return Response(
+            {'error': 'Admin access required.'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    from .models import CommunitySubmission
+
+    qs = CommunitySubmission.objects.all()
+    status_filter = request.query_params.get('status', '').strip()
+    if status_filter in ('pending', 'approved', 'rejected'):
+        qs = qs.filter(status=status_filter)
+
+    submissions = []
+    for s in qs:
+        submissions.append({
+            'id': s.id,
+            'submitted_by': s.submitted_by.username,
+            'product_name': s.product_name,
+            'brand': s.brand,
+            'barcode': s.barcode,
+            'ingredients_text': s.ingredients_text,
+            'nutrition_data': s.nutrition_data,
+            'notes': s.notes,
+            'status': s.status,
+            'admin_notes': s.admin_notes,
+            'reviewed_by': s.reviewed_by.username if s.reviewed_by else None,
+            'created_at': s.created_at.isoformat(),
+            'reviewed_at': s.reviewed_at.isoformat() if s.reviewed_at else None,
+        })
+
+    return Response(submissions, status=status.HTTP_200_OK)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def admin_submission_approve(request, pk):
+    """
+    POST /api/admin/submissions/<id>/approve/
+
+    Marks a community submission as approved. Staff-only.
+    """
+    if not request.user.is_staff:
+        return Response(
+            {'error': 'Admin access required.'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    from .models import CommunitySubmission
+    from django.utils import timezone
+
+    try:
+        submission = CommunitySubmission.objects.get(pk=pk)
+    except CommunitySubmission.DoesNotExist:
+        return Response(
+            {'error': 'Submission not found.'},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    submission.status = 'approved'
+    submission.reviewed_by = request.user
+    submission.reviewed_at = timezone.now()
+    submission.admin_notes = request.data.get('admin_notes', '').strip()
+    submission.save()
+
+    # Automatically add approved ingredients into FoodLens Master Database
+    from .models import Ingredient, IngredientAlias
+    from .engine import _clean_token, _lookup_ingredient
+    from decimal import Decimal
+
+    registered_count = 0
+    if submission.ingredients_text:
+        raw_tokens = [t.strip() for t in submission.ingredients_text.split(',') if t.strip()]
+        for raw_tok in raw_tokens:
+            cleaned = _clean_token(raw_tok) or raw_tok
+            # Check if this ingredient or alias already exists
+            existing = _lookup_ingredient(raw_tok) or _lookup_ingredient(cleaned)
+            if not existing:
+                lower = cleaned.lower()
+                cat = 'other'
+                risk = Decimal('1.0')
+
+                if any(w in lower for w in ['water', 'aqua', 'juice', 'puree', 'extract']):
+                    cat = 'natural'
+                    risk = Decimal('0.0')
+                elif any(w in lower for w in ['sugar', 'syrup', 'fructose', 'glucose', 'dextrose', 'sucralose', 'aspartame', 'stevia']):
+                    cat = 'sweetener'
+                    risk = Decimal('5.0')
+                elif any(w in lower for w in ['colour', 'color', 'caramel', 'e150', 'e102', 'e110', 'e129', 'e133', 'red 40', 'yellow 5', 'yellow 6', 'blue 1']):
+                    cat = 'colorant'
+                    risk = Decimal('3.0')
+                elif any(w in lower for w in ['acid', 'benzoate', 'sorbate', 'sulphite', 'sulfite', 'propionate', 'bht', 'bha', 'tbhq']):
+                    cat = 'preservative'
+                    risk = Decimal('2.5')
+                elif any(w in lower for w in ['flavour', 'flavor', 'msg', 'glutamate']):
+                    cat = 'flavor_enhancer'
+                    risk = Decimal('1.5')
+                elif any(w in lower for w in ['oil', 'fat', 'butter', 'shortening', 'lard', 'tallow']):
+                    cat = 'fat'
+                    risk = Decimal('3.5')
+                elif any(w in lower for w in ['lecithin', 'polysorbate', 'glyceride', 'carrageenan']):
+                    cat = 'emulsifier'
+                    risk = Decimal('2.0')
+                elif any(w in lower for w in ['salt', 'sodium chloride']):
+                    cat = 'sodium_containing'
+                    risk = Decimal('3.0')
+
+                new_ing = Ingredient.objects.create(
+                    name=cleaned.title(),
+                    category=cat,
+                    base_risk_score=risk,
+                    allergen_flag=False,
+                    source_reference=f'Approved from Community Submission #{submission.id}',
+                )
+                IngredientAlias.objects.get_or_create(
+                    ingredient=new_ing,
+                    alias_name=raw_tok.lower(),
+                )
+                if cleaned.lower() != raw_tok.lower():
+                    IngredientAlias.objects.get_or_create(
+                        ingredient=new_ing,
+                        alias_name=cleaned.lower(),
+                    )
+                registered_count += 1
+
+    return Response({
+        'status': 'approved',
+        'message': f'"{submission.product_name}" has been approved. ({registered_count} new ingredients registered)',
+        'registered_ingredients_count': registered_count,
+    }, status=status.HTTP_200_OK)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def admin_submission_reject(request, pk):
+    """
+    POST /api/admin/submissions/<id>/reject/
+
+    Marks a community submission as rejected. Staff-only.
+    Accepts optional admin_notes explaining the reason.
+    """
+    if not request.user.is_staff:
+        return Response(
+            {'error': 'Admin access required.'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    from .models import CommunitySubmission
+    from django.utils import timezone
+
+    try:
+        submission = CommunitySubmission.objects.get(pk=pk)
+    except CommunitySubmission.DoesNotExist:
+        return Response(
+            {'error': 'Submission not found.'},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    submission.status = 'rejected'
+    submission.reviewed_by = request.user
+    submission.reviewed_at = timezone.now()
+    submission.admin_notes = request.data.get('admin_notes', '').strip()
+    submission.save()
+
+    return Response({
+        'status': 'rejected',
+        'message': f'"{submission.product_name}" has been rejected.',
+    }, status=status.HTTP_200_OK)

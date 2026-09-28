@@ -7,7 +7,7 @@ condition multipliers, and viewing scored results.
 from django.contrib import admin
 from .models import (
     Ingredient, IngredientAlias, ConditionMultiplier,
-    ScoredResult, ScoredIngredientDetail,
+    ScoredResult, ScoredIngredientDetail, CommunitySubmission,
 )
 
 
@@ -71,4 +71,16 @@ class ScoredResultAdmin(admin.ModelAdmin):
         'ingredients_text', 'created_at',
     )
     inlines = [ScoredIngredientDetailInline]
+    ordering = ('-created_at',)
+
+
+@admin.register(CommunitySubmission)
+class CommunitySubmissionAdmin(admin.ModelAdmin):
+    list_display = (
+        'id', 'product_name', 'brand', 'submitted_by',
+        'status', 'created_at', 'reviewed_by',
+    )
+    list_filter = ('status', 'created_at')
+    search_fields = ('product_name', 'brand', 'barcode', 'submitted_by__username')
+    readonly_fields = ('submitted_by', 'created_at', 'reviewed_at')
     ordering = ('-created_at',)
