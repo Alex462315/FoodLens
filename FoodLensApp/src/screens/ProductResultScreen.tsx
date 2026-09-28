@@ -52,6 +52,12 @@ import {
   submitFeedback,
   ExplanationResponse,
 } from '../services/explanationService';
+import {
+  speakText,
+  stopSpeaking,
+  buildProductHealthSummary,
+} from '../services/speechService';
+import {checkProductCalories, CalorieCheckResult} from '../services/calorieService';
 
 // Shape of an OCR-sourced result passed from OCRReviewScreen
 export interface OCRSourceResult extends ComputeScoreResponse {
@@ -102,6 +108,30 @@ const ProductResultScreen = ({navigation, route}: any) => {
   // Healthier Alternatives state
   const [alternatives, setAlternatives] = useState<ProductAlternative[]>([]);
   const [alternativesLoading, setAlternativesLoading] = useState(false);
+
+  // Text-to-Speech audio playback states
+  const [isSpeakingSummary, setIsSpeakingSummary] = useState(false);
+  const [isSpeakingAi, setIsSpeakingAi] = useState(false);
+
+  // Calorie check state — checks if product kcal fits in remaining daily intake
+  const [calorieCheck, setCalorieCheck] = useState<CalorieCheckResult | null>(null);
+
+  // Halt speech if navigating away
+  useEffect(() => {
+    return () => {
+      stopSpeaking();
+    };
+  }, []);
+
+  // Fetch calorie check when product nutrition data is available
+  useEffect(() => {
+    const productKcal = result?.nutrition?.energy_kcal;
+    if (productKcal && productKcal > 0) {
+      checkProductCalories(productKcal)
+        .then(setCalorieCheck)
+        .catch(() => {/* silent fail */});
+    }
+  }, [result?.nutrition?.energy_kcal]);
 
   const displayProductName = isOcrSource
     ? (ocrResult?.product_name || 'Scanned Label')
@@ -172,12 +202,80 @@ const ProductResultScreen = ({navigation, route}: any) => {
     }
   };
 
+  const handleToggleAudioSummary = async () => {
+    if (isSpeakingSummary) {
+      await stopSpeaking();
+      setIsSpeakingSummary(false);
+      return;
+    }
+
+    await stopSpeaking();
+    setIsSpeakingAi(false);
+
+    const currentProfile = profiles.find(p => p.id === selectedProfileId);
+    const conditions = currentProfile?.conditions?.map(c => c.condition_name) || [];
+
+    const script = buildProductHealthSummary({
+      productName: displayProductName,
+      brand: result?.brand,
+      riskLabel: activeScore?.risk_label,
+      score: activeScore?.normalized_score !== undefined
+        ? parseFloat(String(activeScore.normalized_score))
+        : undefined,
+      hasAllergens: activeScore?.has_allergen_warning,
+      allergenDetails: activeScore?.allergen_details,
+      userConditions: conditions,
+      aiExplanation: explanation?.explanation_text,
+    });
+
+    setIsSpeakingSummary(true);
+    speakText(script, {
+      onFinish: () => setIsSpeakingSummary(false),
+      onError: () => setIsSpeakingSummary(false),
+    });
+  };
+
+  const handleToggleAiSpeech = async () => {
+    if (isSpeakingAi) {
+      await stopSpeaking();
+      setIsSpeakingAi(false);
+      return;
+    }
+    if (!explanation?.explanation_text) return;
+
+    await stopSpeaking();
+    setIsSpeakingSummary(false);
+    setIsSpeakingAi(true);
+
+    speakText(explanation.explanation_text, {
+      onFinish: () => setIsSpeakingAi(false),
+      onError: () => setIsSpeakingAi(false),
+    });
+  };
+
   const renderShareSection = () => {
     if (!activeScore) return null;
 
     return (
       <View style={styles.shareSection}>
-        <Text style={styles.shareSectionHeader}>SHARE & EXPORT</Text>
+        <Text style={styles.shareSectionHeader}>SHARE & ACTIONS</Text>
+
+        {/* Text-to-Speech Audio Report Button */}
+        <TouchableOpacity
+          style={[styles.shareButton, isSpeakingSummary && styles.speakingButtonActive]}
+          onPress={handleToggleAudioSummary}
+          activeOpacity={0.7}>
+          <Text style={styles.shareIcon}>{isSpeakingSummary ? '⏹️' : '🔊'}</Text>
+          <View style={styles.shareTextContainer}>
+            <Text style={[styles.shareTitle, isSpeakingSummary && styles.speakingTitleActive]}>
+              {isSpeakingSummary ? 'Playing Spoken Health Report...' : 'Listen to Audio Health Report'}
+            </Text>
+            <Text style={styles.shareSubtitle}>
+              {isSpeakingSummary ? 'Tap to stop speech' : 'Hear risks, allergens & AI summary read aloud'}
+            </Text>
+          </View>
+          <Text style={styles.shareArrow}>{isSpeakingSummary ? '■' : '›'}</Text>
+        </TouchableOpacity>
 
         {/* Native Share Button */}
         <TouchableOpacity
@@ -416,6 +514,18 @@ Verified by FoodLens AI Safety Engine`;
               Why this score based on your health profile
             </Text>
           </View>
+          {explanation && (
+            <TouchableOpacity
+              style={[styles.ttsHeaderButton, isSpeakingAi && styles.ttsHeaderButtonActive]}
+              onPress={handleToggleAiSpeech}
+              activeOpacity={0.7}
+              accessibilityLabel="Listen to AI Explanation">
+              <Text style={styles.ttsHeaderIcon}>{isSpeakingAi ? '⏹️' : '🔊'}</Text>
+              <Text style={[styles.ttsHeaderText, isSpeakingAi && styles.ttsHeaderTextActive]}>
+                {isSpeakingAi ? 'Stop' : 'Listen'}
+              </Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         {explanationLoading ? (
@@ -807,7 +917,19 @@ Verified by FoodLens AI Safety Engine`;
 
           {/* Score — already computed by OCRReviewScreen */}
           <View style={styles.scoreCard}>
-            <Text style={styles.scoreCardTitle}>Health Risk Score</Text>
+            <View style={styles.scoreCardTitleRow}>
+              <Text style={styles.scoreCardTitle}>Health Risk Score</Text>
+              <TouchableOpacity
+                style={[styles.ttsQuickButton, isSpeakingSummary && styles.ttsQuickButtonActive]}
+                onPress={handleToggleAudioSummary}
+                activeOpacity={0.7}
+                accessibilityLabel="Listen to Health Report">
+                <Text style={styles.ttsQuickIcon}>{isSpeakingSummary ? '⏹️' : '🔊'}</Text>
+                <Text style={[styles.ttsQuickText, isSpeakingSummary && styles.ttsQuickTextActive]}>
+                  {isSpeakingSummary ? 'Stop' : 'Listen'}
+                </Text>
+              </TouchableOpacity>
+            </View>
 
             <View style={styles.gaugeContainer}>
               <HealthRiskScoreGauge
@@ -1048,19 +1170,33 @@ Verified by FoodLens AI Safety Engine`;
             ) : scoreResult && normalizedScore !== null ? (
               <>
                 {/* Gauge + Risk Badge */}
-                <Text style={styles.scoreCardTitle}>
-                  Health Risk Score
-                </Text>
-                {selectedProfile && (
-                  <Text style={styles.scoringForText}>
-                    Personalized for {selectedProfile.profile_name}
-                    {selectedProfile.conditions.length > 0
-                      ? ` (${selectedProfile.conditions
-                          .map(c => c.condition_name)
-                          .join(', ')})`
-                      : ''}
-                  </Text>
-                )}
+                <View style={styles.scoreCardTitleRow}>
+                  <View style={{flex: 1}}>
+                    <Text style={styles.scoreCardTitle}>
+                      Health Risk Score
+                    </Text>
+                    {selectedProfile && (
+                      <Text style={styles.scoringForText}>
+                        Personalized for {selectedProfile.profile_name}
+                        {selectedProfile.conditions.length > 0
+                          ? ` (${selectedProfile.conditions
+                              .map(c => c.condition_name)
+                              .join(', ')})`
+                          : ''}
+                      </Text>
+                    )}
+                  </View>
+                  <TouchableOpacity
+                    style={[styles.ttsQuickButton, isSpeakingSummary && styles.ttsQuickButtonActive]}
+                    onPress={handleToggleAudioSummary}
+                    activeOpacity={0.7}
+                    accessibilityLabel="Listen to Health Report">
+                    <Text style={styles.ttsQuickIcon}>{isSpeakingSummary ? '⏹️' : '🔊'}</Text>
+                    <Text style={[styles.ttsQuickText, isSpeakingSummary && styles.ttsQuickTextActive]}>
+                      {isSpeakingSummary ? 'Stop' : 'Listen'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
 
                 <View style={styles.gaugeContainer}>
                   <HealthRiskScoreGauge
@@ -1144,6 +1280,41 @@ Verified by FoodLens AI Safety Engine`;
                   {scoreResult.allergen_details.join(', ')}
                 </Text>
               </Text>
+            </View>
+          </View>
+        )}
+
+        {/* ── CALORIE CHECK BANNER ─────────────────────────────── */}
+        {calorieCheck && (
+          <View
+            style={[
+              styles.calorieBanner,
+              calorieCheck.status === 'ok'
+                ? styles.calorieBannerOk
+                : calorieCheck.status === 'warning'
+                ? styles.calorieBannerWarning
+                : styles.calorieBannerExceeded,
+            ]}>
+            <Text style={styles.calorieBannerIcon}>
+              {calorieCheck.status === 'ok' ? '✅' : calorieCheck.status === 'warning' ? '⚠️' : '🚫'}
+            </Text>
+            <View style={styles.calorieBannerContent}>
+              <Text style={styles.calorieBannerTitle}>
+                {calorieCheck.status === 'ok'
+                  ? 'Within Daily Goal'
+                  : calorieCheck.status === 'warning'
+                  ? 'Near Daily Limit'
+                  : 'Exceeds Daily Limit'}
+              </Text>
+              <Text style={styles.calorieBannerText}>{calorieCheck.message}</Text>
+              <View style={styles.calorieStatsRow}>
+                <Text style={styles.calorieStatItem}>
+                  🔥 {calorieCheck.product_kcal} kcal this product
+                </Text>
+                <Text style={styles.calorieStatItem}>
+                  🎯 {calorieCheck.remaining_kcal} kcal remaining
+                </Text>
+              </View>
             </View>
           </View>
         )}
@@ -1669,6 +1840,59 @@ const styles = StyleSheet.create({
   allergenNames: {
     fontFamily: FontFamily.bold,
     color: Colors.redDark,
+  },
+
+  // ==========================================
+  // Calorie Check Banner
+  // ==========================================
+  calorieBanner: {
+    flexDirection: 'row',
+    borderRadius: BorderRadius.lg,
+    borderWidth: 1,
+    padding: Spacing.md,
+    marginBottom: Spacing.md,
+    alignItems: 'flex-start',
+  },
+  calorieBannerOk: {
+    backgroundColor: '#F0FDF4',
+    borderColor: '#22C55E',
+  },
+  calorieBannerWarning: {
+    backgroundColor: '#FFFBEB',
+    borderColor: '#F59E0B',
+  },
+  calorieBannerExceeded: {
+    backgroundColor: '#FEF2F2',
+    borderColor: '#EF4444',
+  },
+  calorieBannerIcon: {
+    fontSize: 22,
+    marginRight: Spacing.md,
+    marginTop: 2,
+  },
+  calorieBannerContent: {flex: 1},
+  calorieBannerTitle: {
+    fontFamily: FontFamily.bold,
+    fontSize: FontSize.subtitle,
+    color: Colors.darkText,
+    marginBottom: 4,
+  },
+  calorieBannerText: {
+    fontFamily: FontFamily.regular,
+    fontSize: FontSize.caption,
+    color: Colors.secondaryText,
+    lineHeight: 20,
+    marginBottom: 6,
+  },
+  calorieStatsRow: {
+    flexDirection: 'row',
+    gap: Spacing.md,
+    flexWrap: 'wrap',
+  },
+  calorieStatItem: {
+    fontFamily: FontFamily.medium,
+    fontSize: FontSize.small,
+    color: Colors.darkText,
   },
 
   // Section Headers
@@ -2353,6 +2577,71 @@ const styles = StyleSheet.create({
     fontFamily: FontFamily.semiBold,
     fontSize: FontSize.small,
     color: Colors.white,
+  },
+  scoreCardTitleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: Spacing.xs,
+  },
+  ttsQuickButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
+    borderRadius: BorderRadius.full,
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    gap: 4,
+  },
+  ttsQuickButtonActive: {
+    backgroundColor: '#FEE2E2',
+    borderColor: '#FCA5A5',
+  },
+  ttsQuickIcon: {
+    fontSize: 14,
+  },
+  ttsQuickText: {
+    fontFamily: FontFamily.semiBold,
+    fontSize: FontSize.caption,
+    color: Colors.primaryGreen,
+  },
+  ttsQuickTextActive: {
+    color: Colors.riskHigh.text,
+  },
+  ttsHeaderButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#ECFDF5',
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+    borderRadius: BorderRadius.full,
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    gap: 4,
+  },
+  ttsHeaderButtonActive: {
+    backgroundColor: '#FEE2E2',
+    borderColor: '#FCA5A5',
+  },
+  ttsHeaderIcon: {
+    fontSize: 13,
+  },
+  ttsHeaderText: {
+    fontFamily: FontFamily.semiBold,
+    fontSize: FontSize.caption,
+    color: '#059669',
+  },
+  ttsHeaderTextActive: {
+    color: Colors.riskHigh.text,
+  },
+  speakingButtonActive: {
+    backgroundColor: '#FEF2F2',
+    borderColor: '#FECACA',
+  },
+  speakingTitleActive: {
+    color: '#B91C1C',
   },
 });
 
