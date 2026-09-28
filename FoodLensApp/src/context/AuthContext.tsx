@@ -17,9 +17,11 @@ import React, {
   ReactNode,
 } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import {GoogleSignin} from '@react-native-google-signin/google-signin';
 import {
   registerUser,
   loginUser,
+  googleLoginUser,
   RegisterPayload,
   LoginPayload,
   AuthResponse,
@@ -42,6 +44,7 @@ interface AuthContextType {
   isLoading: boolean;
   login: (payload: LoginPayload) => Promise<void>;
   register: (payload: RegisterPayload) => Promise<void>;
+  googleLogin: (idToken: string) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -131,12 +134,27 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({children}) => {
   }, []);
 
   /**
+   * Google Sign-In. On success, saves token (same as regular login).
+   * Throws on failure so the calling screen can display errors.
+   */
+  const googleLogin = useCallback(async (idToken: string) => {
+    const response = await googleLoginUser(idToken);
+    await saveAuth(response);
+  }, []);
+
+  /**
    * Logout: clear stored token and user, reset state.
    */
   const logout = useCallback(async () => {
     try {
       await AsyncStorage.removeItem(TOKEN_KEY);
       await AsyncStorage.removeItem(USER_KEY);
+      // Sign out from Google so account picker shows next time
+      try {
+        await GoogleSignin.signOut();
+      } catch (_) {
+        // Ignore if not signed in via Google
+      }
     } catch (error) {
       console.error('Failed to clear stored auth:', error);
     }
@@ -152,6 +170,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({children}) => {
         isLoading,
         login,
         register,
+        googleLogin,
         logout,
       }}>
       {children}

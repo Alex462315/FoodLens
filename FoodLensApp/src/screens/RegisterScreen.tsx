@@ -12,10 +12,16 @@ import {
   ScrollView,
   KeyboardAvoidingView,
   Platform,
+  TouchableOpacity,
+  ActivityIndicator,
 } from 'react-native';
+import {
+  GoogleSignin,
+  statusCodes,
+} from '@react-native-google-signin/google-signin';
 import {Colors} from '../theme/colors';
 import {Typography, FontFamily} from '../theme/typography';
-import {Spacing} from '../theme/spacing';
+import {Spacing, BorderRadius, Shadow} from '../theme/spacing';
 import {PrimaryButton, FormInput, TextButton} from '../components';
 import {useAuth} from '../context/AuthContext';
 import {AxiosError} from 'axios';
@@ -25,7 +31,7 @@ interface RegisterScreenProps {
 }
 
 const RegisterScreen: React.FC<RegisterScreenProps> = ({navigation}) => {
-  const {register} = useAuth();
+  const {register, googleLogin} = useAuth();
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -33,6 +39,7 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({navigation}) => {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [generalError, setGeneralError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
 
   const validate = (): boolean => {
     const newErrors: Record<string, string> = {};
@@ -106,6 +113,40 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({navigation}) => {
     }
   };
 
+  const handleGoogleSignIn = async () => {
+    setGeneralError('');
+    setGoogleLoading(true);
+    try {
+      await GoogleSignin.hasPlayServices({showPlayServicesUpdateDialog: true});
+      const signInResult = await GoogleSignin.signIn();
+      const idToken = signInResult?.data?.idToken;
+      if (!idToken) {
+        setGeneralError('Could not get Google ID token. Please try again.');
+        return;
+      }
+      // Backend creates user if not exists, or logs in existing user
+      await googleLogin(idToken);
+    } catch (err: any) {
+      if (err.code === statusCodes.SIGN_IN_CANCELLED) {
+        // User cancelled — do nothing
+      } else if (err.code === statusCodes.IN_PROGRESS) {
+        setGeneralError('Sign in is already in progress.');
+      } else if (err.code === statusCodes.PLAY_SERVICES_NOT_AVAILABLE) {
+        setGeneralError('Google Play Services not available on this device.');
+      } else {
+        console.error('Google Sign-In error:', JSON.stringify(err));
+        const axiosError = err as AxiosError<{error?: string}>;
+        if (axiosError.response?.data?.error) {
+          setGeneralError(axiosError.response.data.error);
+        } else {
+          setGeneralError(`Google Sign-In failed: ${err.code || err.message || 'Unknown error'}`);
+        }
+      }
+    } finally {
+      setGoogleLoading(false);
+    }
+  };
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <KeyboardAvoidingView
@@ -129,6 +170,29 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({navigation}) => {
               <Text style={styles.errorBannerText}>{generalError}</Text>
             </View>
           ) : null}
+
+          {/* Google Sign-In Button */}
+          <TouchableOpacity
+            style={styles.googleButton}
+            onPress={handleGoogleSignIn}
+            disabled={googleLoading || loading}
+            activeOpacity={0.7}>
+            {googleLoading ? (
+              <ActivityIndicator size="small" color="#4285F4" />
+            ) : (
+              <>
+                <Text style={styles.googleIcon}>G</Text>
+                <Text style={styles.googleButtonText}>Sign up with Google</Text>
+              </>
+            )}
+          </TouchableOpacity>
+
+          {/* Divider */}
+          <View style={styles.dividerRow}>
+            <View style={styles.dividerLine} />
+            <Text style={styles.dividerText}>or</Text>
+            <View style={styles.dividerLine} />
+          </View>
 
           {/* Form */}
           <View style={styles.form}>
@@ -194,7 +258,7 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({navigation}) => {
             title="Sign Up"
             onPress={handleRegister}
             loading={loading}
-            disabled={loading}
+            disabled={loading || googleLoading}
           />
 
           {/* Login Link */}
@@ -247,6 +311,48 @@ const styles = StyleSheet.create({
   errorBannerText: {
     ...Typography.body,
     color: Colors.redDark,
+  },
+  // Google Sign-In Button
+  googleButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: BorderRadius.lg,
+    paddingVertical: 14,
+    paddingHorizontal: Spacing.base,
+    borderWidth: 1.5,
+    borderColor: '#DADCE0',
+    marginBottom: Spacing.base,
+    ...Shadow.sm,
+  },
+  googleIcon: {
+    fontFamily: FontFamily.bold,
+    fontSize: 20,
+    color: '#4285F4',
+    marginRight: Spacing.sm,
+  },
+  googleButtonText: {
+    fontFamily: FontFamily.semiBold,
+    fontSize: 16,
+    color: '#3C4043',
+  },
+  // Divider
+  dividerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: Spacing.base,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: Colors.border,
+  },
+  dividerText: {
+    fontFamily: FontFamily.regular,
+    fontSize: 14,
+    color: Colors.lightText,
+    paddingHorizontal: Spacing.md,
   },
   form: {
     marginBottom: Spacing.xl,

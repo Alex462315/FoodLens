@@ -52,3 +52,19 @@ export const loginUser = async (
   );
   return response.data;
 };
+
+/**
+ * Google Sign-In: send the Google ID token to the backend.
+ * POST /api/auth/google/
+ *
+ * Backend verifies the token with Google and creates/returns user + auth token.
+ */
+export const googleLoginUser = async (
+  idToken: string,
+): Promise<AuthResponse> => {
+  const response = await apiClient.post<AuthResponse>(
+    '/auth/google/',
+    {id_token: idToken},
+  );
+  return response.data;
+};
