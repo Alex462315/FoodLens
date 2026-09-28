@@ -108,21 +108,33 @@ const MoreScreen: React.FC = () => {
                 badge="ADMIN"
                 onPress={() => navigation.navigate('AdminUsers')}
               />
+              <View style={styles.divider} />
+              <MenuItem
+                icon="📋"
+                title="Review Submissions"
+                subtitle="Approve or reject community product submissions"
+                badge="ADMIN"
+                onPress={() => navigation.navigate('AdminSubmissions')}
+              />
             </View>
           </>
         )}
 
-        {/* Community */}
-        <Text style={styles.sectionLabel}>COMMUNITY</Text>
-        <View style={styles.menuCard}>
-          <MenuItem
-            icon="🌍"
-            title="Submit Missing Product"
-            subtitle="Help the community by adding unrecognized regional products"
-            badge="NEW"
-            onPress={() => navigation.navigate('CommunitySubmit')}
-          />
-        </View>
+        {/* Community — hidden for admins/staff, only visible to regular users */}
+        {!isStaff && (
+          <>
+            <Text style={styles.sectionLabel}>COMMUNITY</Text>
+            <View style={styles.menuCard}>
+              <MenuItem
+                icon="🌍"
+                title="Submit Missing Product"
+                subtitle="Help the community by adding unrecognized regional products"
+                badge="NEW"
+                onPress={() => navigation.navigate('CommunitySubmit')}
+              />
+            </View>
+          </>
+        )}
 
         {/* App */}
         <Text style={styles.sectionLabel}>APP</Text>

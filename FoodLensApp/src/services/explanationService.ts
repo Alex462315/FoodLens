@@ -35,6 +35,7 @@ export const generateExplanation = async (
   const response = await apiClient.post<ExplanationResponse>(
     '/explanations/generate/',
     {scored_result_id: scoredResultId},
+    {timeout: 35000},
   );
   return response.data;
 };
