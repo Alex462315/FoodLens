@@ -7,12 +7,13 @@ import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const API_BASE_URL = __DEV__
-  ? 'http://192.168.1.33:8000/api' // Physical device → PC's WiFi IP
+  ? 'http://localhost:8000/api' // USB: uses adb reverse tcp:8000 tcp:8000
+  // Wi-Fi alternative: 'http://192.168.1.38:8000/api'  (phone+PC same Wi-Fi)
   : 'https://your-production-url.com/api';
 
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 15000,
+  timeout: 60000, // 60s — needed for Gemini photo analysis which can take 30-45s
   headers: {
     'Content-Type': 'application/json',
   },

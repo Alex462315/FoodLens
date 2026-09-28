@@ -8,24 +8,27 @@ import {createNativeStackNavigator} from '@react-navigation/native-stack';
 import HealthProfileListScreen from '../screens/HealthProfileListScreen';
 import HealthProfileFormScreen from '../screens/HealthProfileFormScreen';
 import {Colors} from '../theme/colors';
+import {useTheme} from '../theme';
 import {FontFamily} from '../theme/typography';
 
 const Stack = createNativeStackNavigator();
 
 const ProfileNavigator: React.FC = () => {
+  const { colors } = useTheme();
+
   return (
     <Stack.Navigator
       screenOptions={{
         headerStyle: {
-          backgroundColor: Colors.background,
+          backgroundColor: colors.background,
         },
-        headerTintColor: Colors.primaryGreen,
+        headerTintColor: colors.primaryGreen,
         headerTitleStyle: {
           fontFamily: FontFamily.semiBold,
           fontSize: 18,
+          color: colors.darkText,
         },
         headerShadowVisible: false,
-        headerBackTitleVisible: false,
       }}>
       <Stack.Screen
         name="HealthProfileList"
