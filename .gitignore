@@ -30,5 +30,12 @@ build/
 venv/
 __pycache__/
 
+# Reports and generated docs
+*.pdf
+*.docx
+Notepad/
+clientid_wed_app_*.txt
+
 # Temp Excel locks
 ~$*
+
