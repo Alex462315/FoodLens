@@ -13,7 +13,7 @@ const API_BASE_URL = __DEV__
 
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 15000,
+  timeout: 60000, // 60s — needed for Gemini photo analysis which can take 30-45s
   headers: {
     'Content-Type': 'application/json',
   },

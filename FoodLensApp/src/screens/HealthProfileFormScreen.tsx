@@ -32,9 +32,9 @@ import {
 import {AxiosError} from 'axios';
 
 interface HealthProfileFormScreenProps {
-  navigation: any;
-  route: {
-    params: {
+  navigation?: any;
+  route?: {
+    params?: {
       mode: 'create' | 'edit';
       profile?: HealthProfile;
     };
@@ -79,7 +79,7 @@ const HealthProfileFormScreen: React.FC<HealthProfileFormScreenProps> = ({
   navigation,
   route,
 }) => {
-  const {mode, profile} = route.params;
+  const {mode = 'create', profile} = route?.params || {};
   const isEdit = mode === 'edit';
 
   // Form state

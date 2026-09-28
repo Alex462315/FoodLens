@@ -10,24 +10,27 @@ import ProductResultScreen from '../screens/ProductResultScreen';
 import AIExplanationScreen from '../screens/AIExplanationScreen';
 import OCRReviewScreen from '../screens/OCRReviewScreen';
 import {Colors} from '../theme/colors';
+import {useTheme} from '../theme';
 import {FontFamily} from '../theme/typography';
 
 const Stack = createNativeStackNavigator();
 
 const ScanNavigator: React.FC = () => {
+  const { colors } = useTheme();
+
   return (
     <Stack.Navigator
       screenOptions={{
         headerStyle: {
-          backgroundColor: Colors.background,
+          backgroundColor: colors.background,
         },
-        headerTintColor: Colors.primaryGreen,
+        headerTintColor: colors.primaryGreen,
         headerTitleStyle: {
           fontFamily: FontFamily.semiBold,
           fontSize: 18,
+          color: colors.darkText,
         },
         headerShadowVisible: false,
-        headerBackTitleVisible: false,
       }}>
       <Stack.Screen
         name="ScanScreen"
