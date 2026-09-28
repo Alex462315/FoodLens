@@ -13,7 +13,16 @@ import {
   ScrollView,
   Image,
   StatusBar,
+  TouchableOpacity,
+  Modal,
+  Linking,
+  Alert,
+  ActivityIndicator,
+  Share,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import QRCode from 'react-native-qrcode-svg';
+import apiClient from '../services/apiClient';
 import {RouteProp, useRoute} from '@react-navigation/native';
 import {Colors} from '../theme/colors';
 import {FontFamily, FontSize} from '../theme/typography';
@@ -40,6 +49,48 @@ const HistoryDetailScreen: React.FC = () => {
   const scoreColor = isHigh ? '#EF4444' : isMod ? '#F59E0B' : '#10B981';
 
   const n = scanDetail.nutrition_data || {};
+  const [showQrModal, setShowQrModal] = React.useState(false);
+  const [exportingPdf, setExportingPdf] = React.useState(false);
+
+  const handleExportPdf = async () => {
+    setExportingPdf(true);
+    try {
+      const token = await AsyncStorage.getItem('auth_token');
+      const pdfUrl = `${apiClient.defaults.baseURL}/scoring/history/${scanDetail.id}/pdf/?token=${token || ''}`;
+      const wifiPdfUrl = `http://192.168.1.36:8000/api/scoring/history/${scanDetail.id}/pdf/?token=${token || ''}`;
+
+      Alert.alert(
+        '📄 PDF Health Report',
+        `Generated personalized health analysis for "${scanDetail.product_name || 'Product'}".`,
+        [
+          {
+            text: '👁️ Open & View PDF',
+            onPress: async () => {
+              try {
+                await Linking.openURL(pdfUrl);
+              } catch {
+                await Linking.openURL(wifiPdfUrl);
+              }
+            },
+          },
+          {
+            text: '📤 Share PDF Link',
+            onPress: async () => {
+              await Share.share({
+                title: `FoodLens Report — ${scanDetail.product_name || 'Product'}`,
+                message: `📄 FoodLens Health Analysis Report for "${scanDetail.product_name || 'Product'}":\n${wifiPdfUrl}`,
+              });
+            },
+          },
+          {text: 'Cancel', style: 'cancel'},
+        ],
+      );
+    } catch {
+      Alert.alert('Error', 'Could not open PDF report.');
+    } finally {
+      setExportingPdf(false);
+    }
+  };
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -139,6 +190,73 @@ const HistoryDetailScreen: React.FC = () => {
             <Text style={styles.noNutri}>Nutrition data not available for this product.</Text>
           )}
         </View>
+
+        {/* ── Share & Export ─────────────────────────────── */}
+        <View style={styles.actionRow}>
+          <TouchableOpacity
+            style={[styles.actionBtn, styles.pdfBtn]}
+            onPress={handleExportPdf}
+            disabled={exportingPdf}>
+            {exportingPdf ? (
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            ) : (
+              <Text style={styles.actionBtnText}>📄 Export PDF</Text>
+            )}
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.actionBtn, styles.qrBtn]}
+            onPress={() => setShowQrModal(true)}>
+            <Text style={styles.actionBtnText}>📱 QR Share</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* QR Code Sharing Modal */}
+        <Modal
+          visible={showQrModal}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setShowQrModal(false)}>
+          <View style={styles.modalOverlay}>
+            <View style={styles.qrModalContent}>
+              <Text style={styles.qrModalTitle}>📱 Scan & Share Result</Text>
+              <Text style={styles.qrModalSubtitle}>
+                Scan this QR code with any phone camera to view health details for {scanDetail.product_name || 'this product'}.
+              </Text>
+
+              <View style={styles.qrCodeContainer}>
+                <QRCode
+                  value={JSON.stringify({
+                    app: 'FoodLens',
+                    product: scanDetail.product_name || 'Food Product',
+                    score: score,
+                    risk: scanDetail.risk_label || 'Unknown',
+                    barcode: scanDetail.barcode || '',
+                    allergens: scanDetail.has_allergen_warning ? scanDetail.allergen_details : [],
+                  })}
+                  size={200}
+                  color={Colors.darkText}
+                  backgroundColor="#FFFFFF"
+                />
+              </View>
+
+              <View style={styles.qrSummaryCard}>
+                <Text style={styles.qrProductName} numberOfLines={1}>
+                  {scanDetail.product_name || 'Product'}
+                </Text>
+                <Text style={styles.qrScoreText}>
+                  Score: {score}/100 • {scanDetail.risk_label} Risk
+                </Text>
+              </View>
+
+              <TouchableOpacity
+                style={styles.closeQrBtn}
+                onPress={() => setShowQrModal(false)}>
+                <Text style={styles.closeQrBtnText}>Close</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
       </ScrollView>
     </SafeAreaView>
   );
@@ -222,6 +340,107 @@ const styles = StyleSheet.create({
   nutriLabel: {fontFamily: FontFamily.regular, fontSize: FontSize.body, color: Colors.darkText},
   nutriVal: {fontFamily: FontFamily.semiBold, fontSize: FontSize.body, color: Colors.primaryGreen},
   noNutri: {fontFamily: FontFamily.regular, fontSize: FontSize.body, color: Colors.secondaryText, textAlign: 'center', paddingVertical: Spacing.md},
+
+  // Share & Export Actions
+  actionRow: {
+    flexDirection: 'row',
+    gap: Spacing.md,
+    marginBottom: Spacing.base,
+  },
+  actionBtn: {
+    flex: 1,
+    borderRadius: BorderRadius.xl,
+    paddingVertical: Spacing.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...Shadow.sm,
+  },
+  pdfBtn: {
+    backgroundColor: Colors.primaryGreen,
+  },
+  qrBtn: {
+    backgroundColor: '#3B82F6',
+  },
+  actionBtnText: {
+    fontFamily: FontFamily.bold,
+    fontSize: FontSize.body,
+    color: '#FFFFFF',
+  },
+
+  // QR Modal
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: Spacing.lg,
+  },
+  qrModalContent: {
+    backgroundColor: Colors.white,
+    borderRadius: BorderRadius.xl,
+    padding: Spacing.xl,
+    alignItems: 'center',
+    width: '100%',
+    maxWidth: 340,
+    ...Shadow.lg,
+  },
+  qrModalTitle: {
+    fontFamily: FontFamily.bold,
+    fontSize: FontSize.h2,
+    color: Colors.darkText,
+    marginBottom: Spacing.xs,
+    textAlign: 'center',
+  },
+  qrModalSubtitle: {
+    fontFamily: FontFamily.regular,
+    fontSize: FontSize.small,
+    color: Colors.secondaryText,
+    textAlign: 'center',
+    marginBottom: Spacing.lg,
+    lineHeight: 18,
+  },
+  qrCodeContainer: {
+    padding: Spacing.md,
+    backgroundColor: Colors.white,
+    borderRadius: BorderRadius.lg,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: Spacing.lg,
+  },
+  qrSummaryCard: {
+    width: '100%',
+    backgroundColor: Colors.background,
+    borderRadius: BorderRadius.md,
+    padding: Spacing.sm,
+    alignItems: 'center',
+    marginBottom: Spacing.lg,
+  },
+  qrProductName: {
+    fontFamily: FontFamily.bold,
+    fontSize: FontSize.body,
+    color: Colors.darkText,
+    marginBottom: 2,
+  },
+  qrScoreText: {
+    fontFamily: FontFamily.medium,
+    fontSize: FontSize.small,
+    color: Colors.primaryGreen,
+  },
+  closeQrBtn: {
+    backgroundColor: Colors.primaryGreen,
+    borderRadius: BorderRadius.md,
+    paddingVertical: Spacing.sm + 2,
+    paddingHorizontal: Spacing['2xl'],
+    alignItems: 'center',
+    width: '100%',
+  },
+  closeQrBtnText: {
+    fontFamily: FontFamily.bold,
+    fontSize: FontSize.body,
+    color: Colors.white,
+  },
 });
 
 export default HistoryDetailScreen;

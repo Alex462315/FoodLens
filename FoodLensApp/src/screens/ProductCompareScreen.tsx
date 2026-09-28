@@ -83,7 +83,7 @@ const NutrientRow: React.FC<{
   );
 };
 
-const ProductCompareScreen: React.FC = () => {
+const ProductCompareScreen = ({route, navigation}: any) => {
   const [history, setHistory] = useState<ScanRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [product1, setProduct1] = useState<ScanRecord | null>(null);
@@ -93,7 +93,13 @@ const ProductCompareScreen: React.FC = () => {
   useFocusEffect(
     useCallback(() => {
       fetchHistory();
-    }, []),
+      if (route?.params?.prefillProduct1) {
+        setProduct1(route.params.prefillProduct1);
+      }
+      if (route?.params?.prefillProduct2) {
+        setProduct2(route.params.prefillProduct2);
+      }
+    }, [route?.params]),
   );
 
   const fetchHistory = async () => {

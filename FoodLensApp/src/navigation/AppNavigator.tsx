@@ -14,6 +14,7 @@ import ProductCompareScreen from '../screens/ProductCompareScreen';
 import CommunitySubmitScreen from '../screens/CommunitySubmitScreen';
 import AnalyticsScreen from '../screens/AnalyticsScreen';
 import AdminUsersScreen from '../screens/AdminUsersScreen';
+import AdminSubmissionsScreen from '../screens/AdminSubmissionsScreen';
 import HistoryDetailScreen from '../screens/HistoryDetailScreen';
 import {useAuth} from '../context/AuthContext';
 import {Colors} from '../theme/colors';
@@ -69,6 +70,16 @@ const MainNavigator: React.FC = () => (
       options={{
         headerShown: true,
         title: 'User Management',
+        headerBackTitle: 'Back',
+        headerTintColor: Colors.primaryGreen,
+      }}
+    />
+    <Stack.Screen
+      name="AdminSubmissions"
+      component={AdminSubmissionsScreen}
+      options={{
+        headerShown: true,
+        title: 'Review Submissions',
         headerBackTitle: 'Back',
         headerTintColor: Colors.primaryGreen,
       }}

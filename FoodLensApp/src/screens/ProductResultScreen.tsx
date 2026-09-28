@@ -21,7 +21,13 @@ import {
   ActivityIndicator,
   StatusBar,
   Share,
+  Modal,
+  Linking,
+  Alert,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import QRCode from 'react-native-qrcode-svg';
+import apiClient from '../services/apiClient';
 import {Colors} from '../theme/colors';
 import {Typography, FontFamily, FontSize} from '../theme/typography';
 import {Spacing, BorderRadius, Shadow} from '../theme/spacing';
@@ -30,6 +36,8 @@ import {getRiskLevel} from '../components/RiskBadge';
 import {
   ProductLookupResult,
   lookupProductByBarcode,
+  ProductAlternative,
+  getProductAlternatives,
 } from '../services/productService';
 import {
   HealthProfile,
@@ -86,6 +94,241 @@ const ProductResultScreen = ({navigation, route}: any) => {
   const [feedbackState, setFeedbackState] = useState<'none' | 'helpful' | 'not_helpful'>('none');
   const [feedbackLoading, setFeedbackLoading] = useState(false);
 
+  // Sharing & Export states
+  const [showQrModal, setShowQrModal] = useState(false);
+  const [qrMode, setQrMode] = useState<'card' | 'web'>('card');
+  const [exportingPdf, setExportingPdf] = useState(false);
+
+  // Healthier Alternatives state
+  const [alternatives, setAlternatives] = useState<ProductAlternative[]>([]);
+  const [alternativesLoading, setAlternativesLoading] = useState(false);
+
+  const displayProductName = isOcrSource
+    ? (ocrResult?.product_name || 'Scanned Label')
+    : (result?.name || 'Product');
+
+  const activeScore = isOcrSource ? ocrResult : scoreResult;
+
+  const handleNativeShare = async () => {
+    if (!activeScore) return;
+    const riskEmoji =
+      activeScore.risk_label === 'High' ? '🔴'
+      : activeScore.risk_label === 'Moderate' ? '🟡' : '🟢';
+    const scoreVal = Math.round(parseFloat(String(activeScore.normalized_score)));
+    const allergenNote = activeScore.has_allergen_warning && activeScore.allergen_details?.length
+      ? '\n🚨 Allergen Warning: ' + activeScore.allergen_details.join(', ')
+      : '';
+    await Share.share({
+      title: `FoodLens — ${displayProductName} Health Score`,
+      message:
+        `${riskEmoji} FoodLens Health Score for "${displayProductName}"\n` +
+        `Score: ${scoreVal}/100 — ${activeScore.risk_label} Risk${allergenNote}\n\n` +
+        `Scanned with FoodLens — AI-Powered Ingredient Safety Checker`,
+    });
+  };
+
+  const handleExportPdf = async () => {
+    const scoredId = activeScore?.scored_result_id;
+    if (!scoredId) {
+      Alert.alert('Notice', 'Scored result is still processing. Please try again in a moment.');
+      return;
+    }
+    setExportingPdf(true);
+    try {
+      const token = await AsyncStorage.getItem('auth_token');
+      const pdfUrl = `${apiClient.defaults.baseURL}/scoring/history/${scoredId}/pdf/?token=${token || ''}`;
+      const wifiPdfUrl = `http://10.10.158.126:8000/api/scoring/history/${scoredId}/pdf/?token=${token || ''}`;
+
+      Alert.alert(
+        '📄 PDF Health Report',
+        `Generated personalized health analysis for "${displayProductName}".`,
+        [
+          {
+            text: '👁️ Open & View PDF',
+            onPress: async () => {
+              try {
+                await Linking.openURL(pdfUrl);
+              } catch {
+                await Linking.openURL(wifiPdfUrl);
+              }
+            },
+          },
+          {
+            text: '📤 Share PDF Link',
+            onPress: async () => {
+              await Share.share({
+                title: `FoodLens Report — ${displayProductName}`,
+                message: `📄 FoodLens Health Analysis Report for "${displayProductName}":\n${wifiPdfUrl}`,
+              });
+            },
+          },
+          {text: 'Cancel', style: 'cancel'},
+        ],
+      );
+    } catch {
+      Alert.alert('PDF Export Error', 'Could not open PDF report. Please verify connection.');
+    } finally {
+      setExportingPdf(false);
+    }
+  };
+
+  const renderShareSection = () => {
+    if (!activeScore) return null;
+
+    return (
+      <View style={styles.shareSection}>
+        <Text style={styles.shareSectionHeader}>SHARE & EXPORT</Text>
+
+        {/* Native Share Button */}
+        <TouchableOpacity
+          style={styles.shareButton}
+          onPress={handleNativeShare}
+          activeOpacity={0.7}>
+          <Text style={styles.shareIcon}>📤</Text>
+          <View style={styles.shareTextContainer}>
+            <Text style={styles.shareTitle}>Share Score Summary</Text>
+            <Text style={styles.shareSubtitle}>Send quick score to family or chat</Text>
+          </View>
+          <Text style={styles.shareArrow}>›</Text>
+        </TouchableOpacity>
+
+        {/* PDF Report Export Button */}
+        <TouchableOpacity
+          style={styles.shareButton}
+          onPress={handleExportPdf}
+          disabled={exportingPdf}
+          activeOpacity={0.7}>
+          <Text style={styles.shareIcon}>📄</Text>
+          <View style={styles.shareTextContainer}>
+            <Text style={styles.shareTitle}>Export PDF Health Report</Text>
+            <Text style={styles.shareSubtitle}>Download comprehensive PDF with AI insights</Text>
+          </View>
+          {exportingPdf ? (
+            <ActivityIndicator size="small" color={Colors.primaryGreen} />
+          ) : (
+            <Text style={styles.shareArrow}>›</Text>
+          )}
+        </TouchableOpacity>
+
+        {/* QR Code Share Button */}
+        <TouchableOpacity
+          style={styles.shareButton}
+          onPress={() => setShowQrModal(true)}
+          activeOpacity={0.7}>
+          <Text style={styles.shareIcon}>📱</Text>
+          <View style={styles.shareTextContainer}>
+            <Text style={styles.shareTitle}>Scan QR Code to Share</Text>
+            <Text style={styles.shareSubtitle}>Display scannable QR code for nearby phones</Text>
+          </View>
+          <Text style={styles.shareArrow}>›</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  };
+
+  const renderQrModal = () => {
+    if (!activeScore) return null;
+    const scoreVal = Math.round(parseFloat(String(activeScore.normalized_score || 0)));
+    const riskEmoji =
+      activeScore.risk_label === 'High' ? '🔴'
+      : activeScore.risk_label === 'Moderate' ? '🟡' : '🟢';
+
+    const allergenText = activeScore.has_allergen_warning && activeScore.allergen_details?.length
+      ? `🚨 Allergen Alert: ${activeScore.allergen_details.join(', ')}`
+      : '🚨 Allergen Alert: None Detected (Safe)';
+
+    // Concise ingredient list (top 6)
+    const ingSummary = (activeScore.ingredient_breakdown || [])
+      .slice(0, 6)
+      .map(i => `• ${i.matched_name || i.raw_token}${i.category ? ` (${i.category.replace('_', ' ')})` : ''}`)
+      .join('\n');
+
+    const cardContent =
+`🥗 FOODLENS™ HEALTH REPORT
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+📦 Product: ${displayProductName}
+🛡️ Health Score: ${scoreVal}/100
+⚠️ Risk Level: ${activeScore.risk_label || 'Moderate'} Risk ${riskEmoji}
+🏷️ Barcode: ${barcode || (isOcrSource ? 'OCR-LABEL' : result?.barcode || 'N/A')}
+${allergenText}
+${ingSummary ? `\n📋 Analyzed Ingredients:\n${ingSummary}` : ''}
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+Verified by FoodLens AI Safety Engine`;
+
+    const scoredId = activeScore.scored_result_id;
+    const webReportUrl = scoredId
+      ? `http://10.10.158.126:8000/api/scoring/report/${scoredId}/`
+      : `${apiClient.defaults.baseURL}/scoring/report/${scoredId || ''}/`;
+
+    const qrValue = qrMode === 'web' ? webReportUrl : cardContent;
+
+    return (
+      <Modal
+        visible={showQrModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowQrModal(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.qrModalContent}>
+            <Text style={styles.qrModalTitle}>📱 Scan & Share Result</Text>
+            <Text style={styles.qrModalSubtitle}>
+              {qrMode === 'card'
+                ? 'Scan with any phone camera to view formatted health report card.'
+                : 'Scan with any phone camera to open interactive web report in browser.'}
+            </Text>
+
+            {/* Mode Switch Tabs */}
+            <View style={styles.qrTabContainer}>
+              <TouchableOpacity
+                style={[styles.qrTab, qrMode === 'card' && styles.qrTabActive]}
+                onPress={() => setQrMode('card')}
+                activeOpacity={0.8}>
+                <Text style={[styles.qrTabText, qrMode === 'card' && styles.qrTabTextActive]}>
+                  📋 Report Card
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.qrTab, qrMode === 'web' && styles.qrTabActive]}
+                onPress={() => setQrMode('web')}
+                activeOpacity={0.8}>
+                <Text style={[styles.qrTabText, qrMode === 'web' && styles.qrTabTextActive]}>
+                  🌐 Web Page Link
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.qrCodeContainer}>
+              <QRCode
+                value={qrValue}
+                size={185}
+                color={Colors.darkText}
+                backgroundColor="#FFFFFF"
+              />
+            </View>
+
+            <View style={styles.qrSummaryCard}>
+              <Text style={styles.qrProductName} numberOfLines={1}>
+                {displayProductName}
+              </Text>
+              <Text style={styles.qrScoreText}>
+                Score: {scoreVal}/100 • {activeScore.risk_label} Risk
+              </Text>
+              <Text style={styles.qrFormatHintText}>
+                {qrMode === 'card' ? '📄 Human-readable summary card' : '🔗 Opens in Chrome/Safari'}
+              </Text>
+            </View>
+
+            <TouchableOpacity
+              style={styles.closeQrBtn}
+              onPress={() => setShowQrModal(false)}>
+              <Text style={styles.closeQrBtnText}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+    );
+  };
+
 
   // Fetch product on mount (barcode path only)
   useEffect(() => {
@@ -98,6 +341,22 @@ const ProductResultScreen = ({navigation, route}: any) => {
   useEffect(() => {
     fetchProfiles();
   }, []);
+
+  // Set header title and quick share action button
+  useEffect(() => {
+    navigation.setOptions({
+      title: isOcrSource ? 'Label Scan Result' : 'Product Details',
+      headerRight: () => (
+        <TouchableOpacity
+          onPress={handleNativeShare}
+          hitSlop={{top: 10, bottom: 10, left: 10, right: 10}}
+          style={{paddingHorizontal: 8}}
+          accessibilityLabel="Share Result">
+          <Text style={{fontSize: 20}}>📤</Text>
+        </TouchableOpacity>
+      ),
+    });
+  }, [navigation, isOcrSource, activeScore, displayProductName]);
 
   // Auto-score when product + profile are both ready (barcode path only)
   // Auto-fetch AI explanation when score is available
@@ -222,6 +481,196 @@ const ProductResultScreen = ({navigation, route}: any) => {
             </Text>
           </>
         ) : null}
+      </View>
+    );
+  };
+
+  // Auto-fetch healthier alternatives when product or profile changes
+  useEffect(() => {
+    const prodName = isOcrSource ? ocrResult?.product_name : result?.name;
+    if (prodName) {
+      fetchAlternatives(prodName);
+    }
+  }, [result?.name, ocrResult?.product_name, selectedProfileId]);
+
+  const fetchAlternatives = async (productName: string) => {
+    setAlternativesLoading(true);
+    try {
+      const data = await getProductAlternatives({
+        productName,
+        categories: result?.categories || '',
+        ingredientsText: isOcrSource ? '' : (result?.ingredients_text || ''),
+        profileId: selectedProfileId,
+      });
+      setAlternatives(data.alternatives || []);
+    } catch (err) {
+      console.warn('Failed to fetch alternatives:', err);
+    } finally {
+      setAlternativesLoading(false);
+    }
+  };
+
+  const handleCompareWithAlternative = (alt: ProductAlternative) => {
+    const prodName = isOcrSource ? (ocrResult?.product_name || 'Scanned Item') : (result?.name || 'Scanned Item');
+    const prodScore = isOcrSource
+      ? parseFloat(String(ocrResult?.normalized_score || 50))
+      : (scoreResult?.normalized_score ? parseFloat(String(scoreResult.normalized_score)) : 50);
+    const prodRisk = isOcrSource ? (ocrResult?.risk_label || 'Moderate') : (scoreResult?.risk_label || 'Moderate');
+
+    const prefillProduct1 = {
+      id: scoreResult?.scored_result_id || 99991,
+      product_name: prodName,
+      product_image_url: result?.image_url || '',
+      normalized_score: prodScore,
+      risk_label: prodRisk,
+      barcode: barcode || '',
+      created_at: new Date().toISOString(),
+      nutrition_data: (result?.nutrition || {}) as any,
+      has_allergen_warning: !!scoreResult?.has_allergen_warning,
+    };
+
+    const prefillProduct2 = {
+      id: 99992,
+      product_name: alt.name,
+      product_image_url: alt.image_url,
+      normalized_score: alt.normalized_score,
+      risk_label: alt.risk_label,
+      barcode: '',
+      created_at: new Date().toISOString(),
+      nutrition_data: (alt.nutrition || {}) as any,
+      has_allergen_warning: false,
+    };
+
+    navigation.navigate('ProductCompare', {
+      prefillProduct1,
+      prefillProduct2,
+    });
+  };
+
+  const handleNavigateToCommunitySubmit = () => {
+    let ingText = '';
+
+    // Filter ONLY unrecognized ingredients (not in database)
+    if (scoreResult?.ingredient_breakdown && scoreResult.ingredient_breakdown.length > 0) {
+      const unrecognized = scoreResult.ingredient_breakdown
+        .filter(i => i.matched_name === null)
+        .map(i => i.raw_token)
+        .filter(Boolean);
+
+      if (unrecognized.length > 0) {
+        ingText = unrecognized.join(', ');
+      }
+    }
+
+    // Fallback if no breakdown is available
+    if (!ingText && result?.ingredients_text) {
+      ingText = result.ingredients_text.trim();
+    }
+
+    navigation.navigate('CommunitySubmit', {
+      prefillBarcode: barcode || '',
+      prefillProductName: result?.name || '',
+      prefillBrand: result?.brand || '',
+      prefillIngredients: ingText,
+      prefillCalories: result?.nutrition?.energy_kcal ?? null,
+      prefillFat: result?.nutrition?.fat ?? null,
+      prefillSugar: result?.nutrition?.sugars ?? null,
+      prefillSalt: result?.nutrition?.salt ?? null,
+    });
+  };
+
+  const renderHealthierAlternatives = () => {
+    if (!alternativesLoading && alternatives.length === 0) return null;
+
+    return (
+      <View style={styles.altsSection}>
+        <View style={styles.altsSectionHeader}>
+          <Text style={styles.altsIcon}>🌱</Text>
+          <View style={{flex: 1}}>
+            <Text style={styles.altsTitle}>Healthier Alternatives</Text>
+            <Text style={styles.altsSubtitle}>
+              Clean, lower-risk food swaps personalized for your profile
+            </Text>
+          </View>
+        </View>
+
+        {alternativesLoading ? (
+          <View style={styles.altsLoadingContainer}>
+            <ActivityIndicator size="small" color={Colors.primaryGreen} />
+            <Text style={styles.altsLoadingText}>
+              Curating safer swaps based on your health profile...
+            </Text>
+          </View>
+        ) : (
+          alternatives.map(alt => (
+            <View key={alt.id} style={styles.altCard}>
+              <View style={styles.altCardTopRow}>
+                {alt.image_url ? (
+                  <Image
+                    source={{uri: alt.image_url}}
+                    style={styles.altImage}
+                    resizeMode="cover"
+                  />
+                ) : (
+                  <View style={styles.altImagePlaceholder}>
+                    <Text style={{fontSize: 24}}>🥗</Text>
+                  </View>
+                )}
+                <View style={styles.altInfo}>
+                  <Text style={styles.altCategory}>{alt.category.toUpperCase()}</Text>
+                  <Text style={styles.altName} numberOfLines={2}>
+                    {alt.name}
+                  </Text>
+                  <View style={styles.altScorePill}>
+                    <Text style={styles.altScorePillText}>
+                      🛡️ Score: {Math.round(alt.normalized_score)}/100 · {alt.risk_label} Risk
+                    </Text>
+                  </View>
+                </View>
+              </View>
+
+              {/* Why it's better highlight */}
+              <View style={styles.altWhyBetterBox}>
+                <Text style={styles.altWhyBetterText}>
+                  ✨ <Text style={{fontFamily: FontFamily.bold}}>Why it's better: </Text>
+                  {alt.why_better}
+                </Text>
+              </View>
+
+              {/* Quick Nutrition Badges */}
+              <View style={styles.altNutrientRow}>
+                {alt.nutrition.sugars != null && (
+                  <View style={styles.altNutrientPill}>
+                    <Text style={styles.altNutrientLabel}>Sugar</Text>
+                    <Text style={styles.altNutrientVal}>{alt.nutrition.sugars}g</Text>
+                  </View>
+                )}
+                {alt.nutrition.proteins != null && (
+                  <View style={styles.altNutrientPill}>
+                    <Text style={styles.altNutrientLabel}>Protein</Text>
+                    <Text style={styles.altNutrientVal}>{alt.nutrition.proteins}g</Text>
+                  </View>
+                )}
+                {alt.nutrition.energy_kcal != null && (
+                  <View style={styles.altNutrientPill}>
+                    <Text style={styles.altNutrientLabel}>Calories</Text>
+                    <Text style={styles.altNutrientVal}>
+                      {Math.round(alt.nutrition.energy_kcal)}
+                    </Text>
+                  </View>
+                )}
+              </View>
+
+              {/* Compare Head-to-Head Button */}
+              <TouchableOpacity
+                style={styles.altCompareBtn}
+                onPress={() => handleCompareWithAlternative(alt)}
+                activeOpacity={0.8}>
+                <Text style={styles.altCompareBtnText}>⚖️ Compare Head-to-Head</Text>
+              </TouchableOpacity>
+            </View>
+          ))
+        )}
       </View>
     );
   };
@@ -398,6 +847,9 @@ const ProductResultScreen = ({navigation, route}: any) => {
           {/* AI Explanation — inline */}
           {renderAIExplanation()}
 
+          {/* Healthier Alternatives */}
+          {renderHealthierAlternatives()}
+
           {/* Ingredient breakdown */}
           {ocrResult.ingredient_breakdown?.length > 0 && (
             <View style={styles.ingredientCard}>
@@ -415,10 +867,22 @@ const ProductResultScreen = ({navigation, route}: any) => {
             </View>
           )}
 
+          {/* Share & Export Options for Ingredient Label Scan */}
+          {renderShareSection()}
+
+          {/* QR Code Sharing Modal */}
+          {renderQrModal()}
+
+          <PrimaryButton
+            title="Scan Another Product"
+            onPress={handleScanAgain}
+            style={styles.actionButton}
+          />
+
           <TouchableOpacity
             style={styles.secondaryLink}
             onPress={() => navigation.navigate('ScanScreen')}>
-            <Text style={styles.secondaryLinkText}>Scan Another Product</Text>
+            <Text style={styles.secondaryLinkText}>Back to Scanner</Text>
           </TouchableOpacity>
         </ScrollView>
       </SafeAreaView>
@@ -446,6 +910,24 @@ const ProductResultScreen = ({navigation, route}: any) => {
               might not be registered yet.
             </Text>
           </View>
+
+          <View style={styles.communityPromptBanner}>
+            <Text style={styles.communityPromptIcon}>🌍</Text>
+            <View style={styles.communityPromptContent}>
+              <Text style={styles.communityPromptTitle}>Know this product?</Text>
+              <Text style={styles.communityPromptText}>
+                Help the FoodLens community by submitting its ingredient details.
+              </Text>
+            </View>
+          </View>
+
+          <TouchableOpacity
+            style={styles.communitySubmitButton}
+            onPress={() => navigation.navigate('CommunitySubmit', {
+              prefillBarcode: barcode || '',
+            })}>
+            <Text style={styles.communitySubmitButtonText}>📝 Submit to Community Database</Text>
+          </TouchableOpacity>
 
           <PrimaryButton
             title="Scan Again"
@@ -679,6 +1161,13 @@ const ProductResultScreen = ({navigation, route}: any) => {
                 <Text style={styles.coverageWarningText}>
                   The database text for this product ("{result.ingredients_text}") could not be matched to known food ingredients. Risk score cannot be calculated reliably.
                 </Text>
+                <TouchableOpacity
+                  onPress={handleNavigateToCommunitySubmit}
+                  style={styles.communityInlineLink}>
+                  <Text style={styles.communityInlineLinkText}>
+                    📝 Help improve our database — Submit correct ingredients
+                  </Text>
+                </TouchableOpacity>
               </View>
             </View>
           )}
@@ -688,33 +1177,46 @@ const ProductResultScreen = ({navigation, route}: any) => {
           <Text style={styles.sectionTitle}>Ingredients Breakdown</Text>
 
           {scoreResult && scoreResult.ingredient_breakdown.length > 0 ? (
-            <View style={styles.ingredientChipsContainer}>
-              {scoreResult.ingredient_breakdown.map((item, index) => {
-                const isMatched = item.matched_name !== null;
-                return (
-                  <View
-                    key={index}
-                    style={[
-                      styles.ingredientChip,
-                      isMatched ? styles.ingredientChipMatched : styles.ingredientChipUnmatched,
-                    ]}>
-                    <Text style={styles.ingredientChipIcon}>
-                      {isMatched ? '✅' : '❓'}
-                    </Text>
-                    <View style={styles.ingredientChipContent}>
-                      <Text style={styles.ingredientChipName}>
-                        {isMatched ? item.matched_name : item.raw_token}
+            <>
+              <View style={styles.ingredientChipsContainer}>
+                {scoreResult.ingredient_breakdown.map((item, index) => {
+                  const isMatched = item.matched_name !== null;
+                  return (
+                    <View
+                      key={index}
+                      style={[
+                        styles.ingredientChip,
+                        isMatched ? styles.ingredientChipMatched : styles.ingredientChipUnmatched,
+                      ]}>
+                      <Text style={styles.ingredientChipIcon}>
+                        {isMatched ? '✅' : '❓'}
                       </Text>
-                      <Text style={styles.ingredientChipSubtext}>
-                        {isMatched
-                          ? `${item.category || 'ingredient'} · Risk ${Math.round(parseFloat(item.adjusted_score))}/10`
-                          : 'Not in database'}
-                      </Text>
+                      <View style={styles.ingredientChipContent}>
+                        <Text style={styles.ingredientChipName}>
+                          {isMatched ? item.matched_name : item.raw_token}
+                        </Text>
+                        <Text style={styles.ingredientChipSubtext}>
+                          {isMatched
+                            ? `${item.category || 'ingredient'} · Risk ${Math.round(parseFloat(item.adjusted_score))}/10`
+                            : 'Not in database'}
+                        </Text>
+                      </View>
                     </View>
-                  </View>
-                );
-              })}
-            </View>
+                  );
+                })}
+              </View>
+
+              {/* Community contribution link if any ingredient is unrecognized */}
+              {scoreResult.ingredient_breakdown.some(i => i.matched_name === null) && (
+                <TouchableOpacity
+                  onPress={handleNavigateToCommunitySubmit}
+                  style={[styles.communityInlineLink, {marginTop: 12}]}>
+                  <Text style={styles.communityInlineLinkText}>
+                    📝 Notice missing ingredients? Submit correction to Community
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </>
           ) : result.ingredients_text ? (
             <Text style={styles.ingredientsText}>
               {result.ingredients_text}
@@ -793,35 +1295,14 @@ const ProductResultScreen = ({navigation, route}: any) => {
         {/* AI Explanation — inline */}
         {scoreResult && renderAIExplanation()}
 
-        {/* Share Button */}
-        {scoreResult && result && (
-          <TouchableOpacity
-            style={styles.shareButton}
-            onPress={async () => {
-              const riskEmoji =
-                scoreResult.risk_label === 'High' ? '🔴'
-                : scoreResult.risk_label === 'Moderate' ? '🟡' : '🟢';
-              const score = Math.round(parseFloat(String(scoreResult.normalized_score)));
-              const allergenNote = scoreResult.has_allergen_warning
-                ? '\n🚨 Allergen Warning: ' + scoreResult.allergen_details.join(', ')
-                : '';
-              await Share.share({
-                title: `FoodLens — ${result.name || 'Product'} Health Score`,
-                message:
-                  `${riskEmoji} FoodLens Health Score for "${result.name || 'Product'}"\n` +
-                  `Score: ${score}/100 — ${scoreResult.risk_label} Risk${allergenNote}\n\n` +
-                  `Scanned with FoodLens — AI-Powered Ingredient Safety Checker`,
-              });
-            }}
-            activeOpacity={0.7}>
-            <Text style={styles.shareIcon}>📤</Text>
-            <View style={styles.shareTextContainer}>
-              <Text style={styles.shareTitle}>Share This Result</Text>
-              <Text style={styles.shareSubtitle}>Send score to family, doctor or dietitian</Text>
-            </View>
-            <Text style={styles.shareArrow}>›</Text>
-          </TouchableOpacity>
-        )}
+        {/* Healthier Alternatives */}
+        {renderHealthierAlternatives()}
+
+        {/* Share & Export Options */}
+        {renderShareSection()}
+
+        {/* QR Code Sharing Modal */}
+        {renderQrModal()}
 
         {/* Action Button */}
         <PrimaryButton
@@ -1418,6 +1899,59 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
 
+  // Community Database Prompt (Not Found + Unrecognized)
+  communityPromptBanner: {
+    flexDirection: 'row',
+    backgroundColor: '#FFF8E1',
+    borderRadius: BorderRadius.md,
+    padding: Spacing.md,
+    marginBottom: Spacing.md,
+    alignItems: 'flex-start',
+    borderWidth: 1,
+    borderColor: '#FFE082',
+  },
+  communityPromptIcon: {
+    fontSize: 22,
+    marginRight: Spacing.sm,
+  },
+  communityPromptContent: {
+    flex: 1,
+  },
+  communityPromptTitle: {
+    fontFamily: FontFamily.semiBold,
+    fontSize: FontSize.body,
+    color: '#F57C00',
+    marginBottom: 4,
+  },
+  communityPromptText: {
+    fontFamily: FontFamily.regular,
+    fontSize: FontSize.caption,
+    color: '#795548',
+    lineHeight: 18,
+  },
+  communitySubmitButton: {
+    backgroundColor: '#FF9800',
+    borderRadius: BorderRadius.lg,
+    paddingVertical: Spacing.sm + 2,
+    paddingHorizontal: Spacing.base,
+    alignItems: 'center',
+    marginBottom: Spacing.md,
+  },
+  communitySubmitButtonText: {
+    fontFamily: FontFamily.semiBold,
+    fontSize: FontSize.body,
+    color: '#FFFFFF',
+  },
+  communityInlineLink: {
+    marginTop: Spacing.sm,
+    paddingVertical: Spacing.xs,
+  },
+  communityInlineLinkText: {
+    fontFamily: FontFamily.semiBold,
+    fontSize: FontSize.caption,
+    color: '#1976D2',
+    textDecorationLine: 'underline',
+  },
   // Ingredient Chips Breakdown
   ingredientChipsContainer: {
     gap: Spacing.sm,
@@ -1487,6 +2021,125 @@ const styles = StyleSheet.create({
     fontSize: 24,
     color: Colors.lightText,
   },
+  shareSection: {
+    marginBottom: Spacing.md,
+  },
+  shareSectionHeader: {
+    fontFamily: FontFamily.bold,
+    fontSize: FontSize.caption,
+    color: Colors.secondaryText,
+    letterSpacing: 0.8,
+    marginBottom: Spacing.sm,
+    textTransform: 'uppercase',
+  },
+
+  // QR Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: Spacing.lg,
+  },
+  qrModalContent: {
+    backgroundColor: Colors.white,
+    borderRadius: BorderRadius.xl,
+    padding: Spacing.xl,
+    alignItems: 'center',
+    width: '100%',
+    maxWidth: 340,
+    ...Shadow.lg,
+  },
+  qrModalTitle: {
+    fontFamily: FontFamily.bold,
+    fontSize: FontSize.h2,
+    color: Colors.darkText,
+    marginBottom: Spacing.xs,
+    textAlign: 'center',
+  },
+  qrModalSubtitle: {
+    fontFamily: FontFamily.regular,
+    fontSize: FontSize.small,
+    color: Colors.secondaryText,
+    textAlign: 'center',
+    marginBottom: Spacing.md,
+    lineHeight: 18,
+  },
+  qrTabContainer: {
+    flexDirection: 'row',
+    backgroundColor: '#F1F5F9',
+    borderRadius: BorderRadius.full,
+    padding: 3,
+    marginBottom: Spacing.md,
+    width: '100%',
+  },
+  qrTab: {
+    flex: 1,
+    paddingVertical: 7,
+    borderRadius: BorderRadius.full,
+    alignItems: 'center',
+  },
+  qrTabActive: {
+    backgroundColor: Colors.white,
+    ...Shadow.sm,
+  },
+  qrTabText: {
+    fontFamily: FontFamily.medium,
+    fontSize: FontSize.caption,
+    color: Colors.secondaryText,
+  },
+  qrTabTextActive: {
+    fontFamily: FontFamily.bold,
+    color: Colors.primaryGreen,
+  },
+  qrFormatHintText: {
+    fontFamily: FontFamily.regular,
+    fontSize: FontSize.caption - 1,
+    color: Colors.lightText,
+    marginTop: 2,
+  },
+  qrCodeContainer: {
+    padding: Spacing.md,
+    backgroundColor: Colors.white,
+    borderRadius: BorderRadius.lg,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: Spacing.lg,
+  },
+  qrSummaryCard: {
+    width: '100%',
+    backgroundColor: Colors.background,
+    borderRadius: BorderRadius.md,
+    padding: Spacing.sm,
+    alignItems: 'center',
+    marginBottom: Spacing.lg,
+  },
+  qrProductName: {
+    fontFamily: FontFamily.bold,
+    fontSize: FontSize.body,
+    color: Colors.darkText,
+    marginBottom: 2,
+  },
+  qrScoreText: {
+    fontFamily: FontFamily.medium,
+    fontSize: FontSize.small,
+    color: Colors.primaryGreen,
+  },
+  closeQrBtn: {
+    backgroundColor: Colors.primaryGreen,
+    borderRadius: BorderRadius.md,
+    paddingVertical: Spacing.sm + 2,
+    paddingHorizontal: Spacing['2xl'],
+    alignItems: 'center',
+    width: '100%',
+  },
+  closeQrBtnText: {
+    fontFamily: FontFamily.bold,
+    fontSize: FontSize.body,
+    color: Colors.white,
+  },
 
   // ── OCR Result specific ─────────────────────────────────────────────────────
   ocrHeaderCard: {
@@ -1548,6 +2201,158 @@ const styles = StyleSheet.create({
     fontFamily: FontFamily.bold,
     fontSize: FontSize.body,
     color: Colors.primaryGreen,
+  },
+
+  // ── Healthier Alternatives Section ──────────────────────────────────────────
+  altsSection: {
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.xl,
+    padding: Spacing.base,
+    marginBottom: Spacing.base,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    ...Shadow.sm,
+  },
+  altsSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: Spacing.md,
+  },
+  altsIcon: {
+    fontSize: 26,
+    marginRight: Spacing.sm,
+  },
+  altsTitle: {
+    fontFamily: FontFamily.bold,
+    fontSize: FontSize.h2,
+    color: Colors.darkText,
+  },
+  altsSubtitle: {
+    fontFamily: FontFamily.regular,
+    fontSize: FontSize.small,
+    color: Colors.secondaryText,
+    marginTop: 2,
+  },
+  altsLoadingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: Spacing.md,
+    gap: Spacing.sm,
+  },
+  altsLoadingText: {
+    fontFamily: FontFamily.medium,
+    fontSize: FontSize.small,
+    color: Colors.secondaryText,
+    flex: 1,
+  },
+  altCard: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: BorderRadius.lg,
+    padding: Spacing.md,
+    marginBottom: Spacing.md,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  altCardTopRow: {
+    flexDirection: 'row',
+    marginBottom: Spacing.sm,
+  },
+  altImage: {
+    width: 60,
+    height: 60,
+    borderRadius: BorderRadius.md,
+    backgroundColor: Colors.divider,
+  },
+  altImagePlaceholder: {
+    width: 60,
+    height: 60,
+    borderRadius: BorderRadius.md,
+    backgroundColor: '#E6F4EA',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  altInfo: {
+    flex: 1,
+    marginLeft: Spacing.md,
+    justifyContent: 'center',
+  },
+  altCategory: {
+    fontFamily: FontFamily.bold,
+    fontSize: 10,
+    color: Colors.primaryGreen,
+    letterSpacing: 0.5,
+    marginBottom: 2,
+  },
+  altName: {
+    fontFamily: FontFamily.semiBold,
+    fontSize: FontSize.body,
+    color: Colors.darkText,
+    lineHeight: 18,
+  },
+  altScorePill: {
+    backgroundColor: '#E6F4EA',
+    borderRadius: BorderRadius.full,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    alignSelf: 'flex-start',
+    marginTop: 4,
+  },
+  altScorePillText: {
+    fontFamily: FontFamily.bold,
+    fontSize: 11,
+    color: Colors.primaryGreen,
+  },
+  altWhyBetterBox: {
+    backgroundColor: '#F0FDF4',
+    borderLeftWidth: 3,
+    borderLeftColor: Colors.primaryGreen,
+    borderRadius: 6,
+    padding: Spacing.sm,
+    marginBottom: Spacing.sm,
+  },
+  altWhyBetterText: {
+    fontFamily: FontFamily.regular,
+    fontSize: FontSize.small,
+    color: '#166534',
+    lineHeight: 16,
+  },
+  altNutrientRow: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+    marginBottom: Spacing.sm,
+  },
+  altNutrientPill: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: BorderRadius.sm,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    alignItems: 'center',
+  },
+  altNutrientLabel: {
+    fontFamily: FontFamily.medium,
+    fontSize: 9,
+    color: Colors.secondaryText,
+    textTransform: 'uppercase',
+  },
+  altNutrientVal: {
+    fontFamily: FontFamily.bold,
+    fontSize: FontSize.small,
+    color: Colors.darkText,
+    marginTop: 1,
+  },
+  altCompareBtn: {
+    backgroundColor: Colors.primaryGreen,
+    borderRadius: BorderRadius.md,
+    paddingVertical: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  altCompareBtnText: {
+    fontFamily: FontFamily.semiBold,
+    fontSize: FontSize.small,
+    color: Colors.white,
   },
 });
 

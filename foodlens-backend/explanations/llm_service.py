@@ -190,33 +190,41 @@ def generate_explanation(scored_result: ScoredResult) -> str:
         # Initialize the client with the API key
         client = genai.Client(api_key=api_key)
 
-        # Call the model
-        response = client.models.generate_content(
-            model=GEMINI_MODEL,
-            contents=user_prompt,
-            config=types.GenerateContentConfig(
-                system_instruction=SYSTEM_INSTRUCTION,
-                temperature=0.4,        # Low temperature for factual rephrasing
-                max_output_tokens=500,   # Keep explanations concise
-                thinking_config=types.ThinkingConfig(thinking_budget=0),
-            ),
+        # Call the model with resilient fallback
+        models_to_try = [GEMINI_MODEL, 'gemini-3.8-flash', 'gemini-3.5-flash']
+        explanation_text = None
+        last_error = None
+
+        for m in dict.fromkeys(models_to_try):
+            try:
+                response = client.models.generate_content(
+                    model=m,
+                    contents=user_prompt,
+                    config=types.GenerateContentConfig(
+                        system_instruction=SYSTEM_INSTRUCTION,
+                        temperature=0.4,        # Low temperature for factual rephrasing
+                        max_output_tokens=500,   # Keep explanations concise
+                        thinking_config=types.ThinkingConfig(thinking_budget=0),
+                    ),
+                )
+                if response and response.text:
+                    explanation_text = response.text.strip()
+                    logger.info(
+                        'Successfully generated explanation for ScoredResult #%d with %s (%d chars)',
+                        scored_result.id, m, len(explanation_text),
+                    )
+                    return explanation_text
+            except Exception as me:
+                last_error = me
+                logger.warning('Gemini model %s failed: %s. Trying fallback...', m, str(me))
+
+        if last_error:
+            raise last_error
+
+        raise ExplanationError(
+            'Gemini returned an empty response. The model may have '
+            'refused the request or encountered a content filter.'
         )
-
-        # Validate response
-        if not response or not response.text:
-            raise ExplanationError(
-                'Gemini returned an empty response. The model may have '
-                'refused the request or encountered a content filter.'
-            )
-
-        explanation_text = response.text.strip()
-
-        logger.info(
-            'Successfully generated explanation for ScoredResult #%d (%d chars)',
-            scored_result.id, len(explanation_text),
-        )
-
-        return explanation_text
 
     except APIKeyMissingError:
         raise  # Re-raise without wrapping
@@ -229,3 +237,78 @@ def generate_explanation(scored_result: ScoredResult) -> str:
         raise ExplanationError(
             f'Could not generate explanation: {str(e)}'
         ) from e
+
+
+# ---------------------------------------------------------------------------
+# OCR Typo & Noise Cleaning
+# ---------------------------------------------------------------------------
+
+OCR_CLEANUP_SYSTEM_INSTRUCTION = """\
+You are FoodLens AI, a specialized OCR text cleaner for packaged food ingredient lists.
+
+YOUR ONLY JOB: Clean up optical character recognition (OCR) noise, spelling typos, split words, and OCR artifact characters from the provided raw ingredient list.
+
+STRICT RULES — VIOLATION OF ANY RULE IS UNACCEPTABLE:
+1. Do NOT add, remove, or substitute ingredients that were not present in the original text.
+2. Do NOT invent, assume, or insert any health claims, nutritional advice, or opinions.
+3. Fix obvious OCR character misrecognitions (e.g. 'sugr' -> 'sugar', 'paim oi1' -> 'palm oil', 'wh3at' -> 'wheat', 's@lt' -> 'salt', 'ingred1ents' -> 'ingredients', 'c0coa' -> 'cocoa').
+4. Separate words accidentally concatenated by OCR (e.g. 'flour,sugar' -> 'flour, sugar').
+5. Remove stray scanner artifacts like random pipes '|', bullets '•', asterisks, or stray punctuation.
+6. Return ONLY the cleaned comma-separated list of ingredients. Do NOT return any preamble, Markdown quotes, bullet points, or explanation.
+"""
+
+
+def clean_ocr_text(raw_ocr_text: str) -> str:
+    """
+    Cleans noisy raw OCR text using Gemini without altering ingredients or health claims.
+
+    Follows the architectural constraint:
+      - Used strictly to clean up noisy OCR text.
+      - Never determines health risk scores, allergen status, or medical claims.
+      - Wraps behind this single LLM service module.
+      - Gracefully falls back to raw_ocr_text on any failure or missing key.
+
+    Args:
+        raw_ocr_text: The raw string extracted from Tesseract OCR.
+
+    Returns:
+        str: Cleaned ingredient list text, or original text if cleaning fails.
+    """
+    if not raw_ocr_text or not raw_ocr_text.strip():
+        return raw_ocr_text
+
+    api_key = os.getenv('GEMINI_API_KEY', '')
+    if not api_key:
+        logger.warning('GEMINI_API_KEY is not set; skipping OCR typo correction.')
+        return raw_ocr_text
+
+    try:
+        client = genai.Client(api_key=api_key)
+        user_prompt = f"Clean the following raw food ingredient list OCR text:\n\n{raw_ocr_text.strip()}"
+
+        logger.info('Calling Gemini (%s) to clean OCR text (%d chars)', GEMINI_MODEL, len(raw_ocr_text))
+
+        response = client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=user_prompt,
+            config=types.GenerateContentConfig(
+                system_instruction=OCR_CLEANUP_SYSTEM_INSTRUCTION,
+                temperature=0.1,  # Low temperature for strict fidelity
+                max_output_tokens=600,
+                thinking_config=types.ThinkingConfig(thinking_budget=0),
+            ),
+        )
+
+        if response and response.text:
+            cleaned = response.text.strip()
+            # Basic sanity check: ensure it didn't return an empty string or hallucinated paragraph
+            if len(cleaned) > 0 and len(cleaned) <= max(len(raw_ocr_text) * 3, 50):
+                logger.info('Successfully cleaned OCR text with Gemini (%d -> %d chars)', len(raw_ocr_text), len(cleaned))
+                return cleaned
+
+        return raw_ocr_text
+
+    except Exception as e:
+        logger.warning('Failed to clean OCR text with Gemini: %s. Falling back to raw text.', str(e))
+        return raw_ocr_text
+
